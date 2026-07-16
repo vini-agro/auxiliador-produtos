@@ -23,7 +23,13 @@ export async function findOpEventoByDate(iso) {
  */
 export async function getAulaLwUnitUrl(aulaRecordId) {
   const base = getBase();
-  const record = await base('Aulas').find(aulaRecordId);
+  let record;
+  try {
+    record = await base('Aulas').find(aulaRecordId);
+  } catch (err) {
+    if (err && err.error === 'NOT_FOUND') return null;
+    throw err;
+  }
   return record.fields['LW Unit URL'] || null;
 }
 
@@ -33,6 +39,12 @@ export async function getAulaLwUnitUrl(aulaRecordId) {
  */
 export async function getLinkCsat(eventoCursoRecordId) {
   const base = getBase();
-  const record = await base('Evento × Curso').find(eventoCursoRecordId);
+  let record;
+  try {
+    record = await base('Evento × Curso').find(eventoCursoRecordId);
+  } catch (err) {
+    if (err && err.error === 'NOT_FOUND') return null;
+    throw err;
+  }
   return record.fields['LINK CSAT'] || null;
 }
