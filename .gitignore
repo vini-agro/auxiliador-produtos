@@ -1,0 +1,4 @@
+node_modules/
+automation/.env
+*.png
+activity-export-*.csv
