@@ -196,3 +196,84 @@ O painel também mostra dica sobre variáveis de URL disponíveis:
   unit duplicados ("Aula Teste" aparece duas vezes nesse curso de teste).
 - **Editar o embed:** `textarea[data-key="embed"]` +
   `[data-testid="course-content-authoring--edit-form--save-button"]`.
+
+## Atualização — Task 4 (confirmações e correções sobre o que estava acima)
+
+Implementado em `automation/src/lwRobot.js` e exercitado de ponta a ponta
+(escrita + persistência confirmada, ver `.superpowers/sdd/task-4-report.md`)
+contra o curso de teste real. Os campos abaixo eram *claims* não verificadas
+deixadas pelo Task 3 — aqui ficam confirmadas ou corrigidas.
+
+### Botão salvar — confirmado, mas é um `<div>`, não um `<button>`
+
+`[data-testid="course-content-authoring--edit-form--save-button"]` está
+correto e é **único** no DOM (`count() === 1`), mas o elemento real é:
+
+```html
+<div class="btn btn-l save" data-testid="course-content-authoring--edit-form--save-button">Save</div>
+```
+
+Ou seja, não dá pra usar `page.getByRole('button', {name: 'Save'})` (não é
+uma tag `<button>` nem tem role de botão) — precisa ser
+`locator('[data-testid="..."]').click()`, que funciona com qualquer tag.
+Confirmado visível (`isVisible() === true`) sem precisar de scroll dentro do
+painel.
+
+Ao clicar, dispara **duas** chamadas `POST /api/author/products` (ambas
+`200`), presumivelmente uma pro conteúdo da unit e outra por algum efeito
+colateral (ex.: reindexação). `lwRobot.js` espera a primeira resposta `POST`
+pra essa URL antes de seguir.
+
+### Botão cancelar — `.btn.cancel` existe, mas é ambíguo (não usado por Task 4)
+
+`.btn.cancel` casa com **3 elementos** no DOM da courseFrame (não 1), e o
+`.first()` não estava visível no momento testado — provavelmente porque
+existem templates de outros formulários de edição na mesma página que
+compartilham a classe. **Não confirmado qual dos 3 é o botão certo do
+painel de embed** — `lwRobot.js` não usa Cancel, então isso ficou como
+limitação conhecida, não resolvida.
+
+### Textarea de embed — confirmado único e funcional
+
+`textarea[data-key="embed"]` tem `count() === 1` dentro da courseFrame,
+aceita `.fill()` normalmente, e o valor escrito é lido de volta
+corretamente via `.inputValue()` — inclusive **depois de fechar o browser e
+abrir uma sessão totalmente nova** (novo login, nova navegação), confirmando
+persistência real no backend, não só estado de UI em memória.
+
+### Busca de curso — confirmado que é por PALAVRA do título, não pelo slug
+
+Contrário à suposição inicial do brief (`courseTitleId` como termo de
+busca), a busca da LearnWorlds **não** encontra nada para:
+- o slug inteiro com hifens (`teste-automacao-claude-apagar`)
+- o slug com hifens trocados por espaço (`teste automacao claude apagar`)
+
+Mas encontra corretamente pra **qualquer palavra isolada e específica** do
+título visível do curso (`claude`, `automacao`, `apagar` → cada uma sozinha
+retorna exatamente esse 1 curso). Uma palavra comum (`teste`) retorna 5
+cursos — ambígua demais. Estado de "zero resultados" é detectável pelo texto
+`"No matches found"` (visível); resultados renderizam via
+`page.getByText(/Showing \d+ course/)`.
+
+`lwRobot.js` (`openCourse()`) resolve isso tentando cada palavra do
+`courseTitleId` recebido (cortando por `-`/`_`/espaço), das mais longas
+(mais específicas) às mais curtas, e clicando no primeiro card cujo
+resultado leve a uma URL contendo `courseid=<courseTitleId esperado>` —
+sem depender do texto do título visível, que a função nunca recebe.
+
+Seletor do card clicável confirmado via inspeção de DOM (menor ancestral
+comum clicável do texto do título do curso): **`.course-box`** (dentro do
+iframe de listagem).
+
+### `waitForLoadState('networkidle')` não é confiável nesse painel
+
+Descoberto rodando `lwRobot.js` de ponta a ponta: em pelo menos uma
+navegação (voltar da tela de conteúdo do curso pra listagem, ou vice-versa),
+`page.waitForLoadState('networkidle')` **nunca resolveu** e bateu no timeout
+padrão de 30s — provavelmente por polling/analytics em segundo plano que
+mantém requisições em voo indefinidamente. A correção usada em
+`lwRobot.js` (`settleNetwork()`) é tratar esse wait como best-effort, com
+timeout curto (8s) e `.catch(() => {})`, sem propagar erro — a navegação em
+si (troca de URL) já havia terminado bem antes disso; são os waits
+explícitos em elementos específicos depois que garantem que a página está
+pronta pro próximo passo, não o `networkidle`.
