@@ -787,8 +787,13 @@ git commit -m "feat: orquestrador ponta a ponta (video Vimeo -> aula na LW), val
 
 ## Próximos passos (fora deste plano)
 
-- Adicionar campo real `LW Unit URL` em todas as `Aulas` recorrentes (cadastro manual, um por vez).
-- Resolver a simplificação do Task 9 (Step 1): `getAulaLwUnitUrl` devolver também o nome exato da aula, não assumir `'Aula Teste'`.
-- Desambiguação por professor quando houver múltiplos eventos na mesma data (hoje cai em revisão manual).
-- Mover a execução de `process-video.js` para dentro do n8n (trigger agendado escaneando a pasta do Vimeo + `Execute Command`/serviço HTTP chamando este script) — **só depois que os Tasks 1–9 estiverem todos validados manualmente**.
-- Apagar manualmente o curso de teste `teste-automacao-claude-apagar` na LW quando a validação estiver concluída.
+> Atualizado após a revisão final de todo o branch (2026-07-16). O robô de escrita na LW (`updateEmbedUnit`) está validado ponta a ponta contra dados reais. O caminho Airtable → matching → geração do HTML **não** foi validado com um evento real ainda (toda execução real caiu em "sem evento pra essa data" no primeiro passo) — os itens abaixo bloqueiam essa validação completa, não o merge desta fase de POC.
+
+1. **Cadastro real do `LW Unit URL`:** adicionar esse campo em `Aulas` e popular pelo menos um registro real (isso é o Task 9/Step 3 que ficou deferido). Definir antes disso **o formato exato do campo** — hoje `process-video.js` assume uma URL contendo `/courses/{slug}/`, mas o `SELECTORS.md` confirmou que a URL real do editor é `/author/course?courseid={slug}&tab=contents` (sem `/courses/`). Como o robô só precisa do slug pra buscar o curso, o mais simples é o campo guardar direto o `courseTitleId` (slug), não uma URL completa.
+2. **Identidade da aula não vem do Airtable:** hoje o robô sempre procura uma unit chamada literalmente "Aula Teste" (hardcoded em `process-video.js`) e pega a primeira em caso de duplicata (`.first()` em `lwRobot.js`). Resolver isso junto com o item 1 — `getAulaLwUnitUrl` (ou uma função irmã) devolver também o nome real da aula.
+3. **Guarda de allowlist está na camada errada:** `LW_ALLOWED_COURSE_IDS` hoje só é checado em `process-video.js`, não dentro de `updateEmbedUnit` (`lwRobot.js`). Qualquer chamador futuro (novo script, integração n8n) pode ignorar essa checagem. Mover a checagem pra dentro de `updateEmbedUnit` ou um wrapper compartilhado, pra a garantia viajar junto com a escrita, não com quem a chama.
+4. **Filtro de data no Airtable é frágil:** `findOpEventoByDate` usa `{Data} = '${iso}'` (comparação de string), que é conhecido por dar falso-negativo por fuso horário/formatação. Trocar por `IS_SAME({Data}, '${iso}', 'day')` e confirmar contra um registro real conhecido antes de confiar no resultado "0 registros" como significando "sem evento" (hoje não dá pra distinguir isso de "a fórmula nunca bateu").
+5. **Validar o caminho de sucesso completo** (itens 1-4 resolvidos): rodar `process-video.js` contra um evento real que tenha `LW Unit URL` cadastrado e confirmar `{ok: true}` — só depois disso o pipeline Airtable→LW pode ser considerado provado, não só o robô isoladamente.
+6. Desambiguação por professor quando houver múltiplos eventos na mesma data (hoje cai em revisão manual — comportamento seguro, mas nunca resolve automaticamente).
+7. Mover a execução de `process-video.js` para dentro do n8n — **só depois dos itens 1-5 acima**.
+8. Apagar manualmente o curso de teste `teste-automacao-claude-apagar` na LW quando a validação estiver concluída.
