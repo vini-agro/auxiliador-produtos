@@ -59,12 +59,28 @@ if (!csatLink) {
 
 const html = generateEmbedHtml({ vimeoEmbedUrl, csatLink });
 
+const courseTitleId = lwUnitUrl.split('/courses/')[1]?.split('/')[0];
+if (!courseTitleId) {
+  console.log(`REVISÃO MANUAL: não foi possível extrair courseTitleId de "${lwUnitUrl}"`);
+  process.exit(0);
+}
+
+const allowedCourseIds = (process.env.LW_ALLOWED_COURSE_IDS || '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
+
+if (!allowedCourseIds.includes(courseTitleId)) {
+  console.log(`REVISÃO MANUAL: courseTitleId "${courseTitleId}" não está na allowlist (LW_ALLOWED_COURSE_IDS). Recusando escrever automaticamente — confirme manualmente antes de liberar esse curso.`);
+  process.exit(0);
+}
+
 console.log('Colando embed na LW, unit URL:', lwUnitUrl);
 const result = await updateEmbedUnit({
   adminUrl: process.env.LW_ADMIN_URL,
   email: process.env.LW_ADMIN_EMAIL,
   password: process.env.LW_ADMIN_PASSWORD,
-  courseTitleId: lwUnitUrl.split('/courses/')[1]?.split('/')[0],
+  courseTitleId,
   unitName: 'Aula Teste',
   html,
 });
