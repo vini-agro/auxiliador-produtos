@@ -20,17 +20,20 @@
 //    "Headless" da string — isso é suficiente pra passar pelo Cloudflare
 //    mesmo rodando headless: true (não precisa de headed/GUI).
 //
-// 3. BLOQUEIO ATUAL: com as credenciais de automation/.env
-//    (LW_ADMIN_EMAIL/LW_ADMIN_PASSWORD), a própria API de login da
-//    LearnWorlds (POST /api/signin) responde 200 com
-//    {"success":false,"errors":[{"translation_code":"not_valid_user",
-//    "message":"Please, check your email and password."}]}.
-//    Ou seja, o formulário e os seletores estão corretos (os valores
-//    aparecem certos no screenshot 02), mas a LearnWorlds rejeita as
-//    credenciais como inválidas. Isso não é um problema de seletor — é uma
-//    questão de credencial/conta. Os passos 5 e 6 (navegar até o curso de
-//    teste e abrir a unit) dependem de estar autenticado no /admin e por
-//    isso não puderam ser confirmados nesta rodada.
+// 3. O editor de curso (Course manager / Course outline) é renderizado
+//    dentro de <iframe>s. Não dá pra simplesmente navegar direto pra
+//    `/author/course?courseid=...` via page.goto() logo após o login —
+//    isso retorna `?msg=not-logged-in` (a sessão de autoria parece
+//    depender de navegação real pelo menu, não só do cookie de sessão). É
+//    preciso clicar em "Courses & programs" no menu lateral e depois no
+//    card do curso, como um usuário real faria.
+//
+// 4. Clicar diretamente no TEXTO do nome da unit ("Aula Teste") entra em
+//    modo de RENOMEAR inline (mostra um campo de texto + botão "Save"), e
+//    NÃO abre o modal de edição de conteúdo. Pra abrir o modal
+//    "Update Embed learning activity" é preciso passar o mouse por cima da
+//    linha da unit (hover) pra revelar uma barra de ações, e clicar no
+//    botão "Settings" dessa barra.
 import 'dotenv/config';
 import { chromium } from 'playwright';
 
@@ -38,6 +41,10 @@ const LW_ADMIN_URL = process.env.LW_ADMIN_URL;
 const LW_ADMIN_EMAIL = process.env.LW_ADMIN_EMAIL;
 const LW_ADMIN_PASSWORD = process.env.LW_ADMIN_PASSWORD;
 const LW_BASE_URL = LW_ADMIN_URL.replace(/\/admin\/?$/, '');
+
+const TEST_COURSE_SEARCH_TERM = 'apagar';
+const TEST_COURSE_TITLE = 'TESTE AUTOMACAO CLAUDE - APAGAR';
+const TEST_UNIT_TITLE = 'Aula Teste';
 
 // Remove "Headless" do userAgent padrão do Chromium pra não ser bloqueado
 // pelo Cloudflare (ver descoberta 2 acima).
@@ -72,7 +79,11 @@ async function main() {
     .catch(() => null);
   await page.locator('#submitLogin').click();
   const signinResponse = await signinResponsePromise;
-  await page.waitForTimeout(1000);
+  await page.waitForLoadState('networkidle');
+  // Esperar um elemento estável do painel admin (o dashboard renderiza em
+  // etapas depois do "networkidle" do frame principal, senão o screenshot
+  // sai em branco por uma corrida de timing).
+  await page.getByText('Courses & programs').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
   await page.screenshot({ path: 'screenshots/02-after-login.png', fullPage: true });
 
   if (signinResponse) {
@@ -90,14 +101,34 @@ async function main() {
     }
   }
 
-  // Step 5: navegar até o curso de teste e abrir a unit "Aula Teste"
-  // (só roda se o login acima tiver funcionado)
-  await page.goto(`${LW_BASE_URL}/admin/courses/teste-automacao-claude-apagar/content`);
+  // Step 5: navegar até o curso de teste via UI real (não dá pra pular
+  // direto pra URL do /author/course logo após logar, ver descoberta 3).
+  await page.getByText('Courses & programs').click();
   await page.waitForLoadState('networkidle');
+
+  // Cuidado: a página principal TAMBÉM navega para uma URL que contém
+  // "/author/courses" (sem o "?_referrer=admin"), então um match genérico
+  // pega o frame errado (o wrapper, sem os campos de busca/lista). É
+  // preciso casar a URL específica do iframe interno.
+  const coursesFrame = page.frames().find((f) => f.url().includes('/author/courses?_referrer=admin'));
+  await coursesFrame.locator('input[placeholder="Search"]').fill(TEST_COURSE_SEARCH_TERM);
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: 'screenshots/03a-courses-search.png', fullPage: true });
+
+  await coursesFrame.getByText(TEST_COURSE_TITLE).click();
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(1000);
   await page.screenshot({ path: 'screenshots/03-course-content.png', fullPage: true });
 
-  await page.getByText('Aula Teste').first().click();
-  await page.waitForTimeout(1000);
+  // Abrir a unit de teste: hover na linha pra revelar a barra de ações e
+  // clicar em "Settings" (clicar direto no texto entra em modo renomear).
+  const courseFrame = page
+    .frames()
+    .find((f) => f.url().includes('/author/course?courseid=') && f.url().includes('_referrer=admin'));
+  await courseFrame.getByText(TEST_UNIT_TITLE).first().hover();
+  await page.waitForTimeout(300);
+  await courseFrame.getByText('Settings', { exact: true }).first().click({ force: true });
+  await page.waitForTimeout(1200);
   await page.screenshot({ path: 'screenshots/04-unit-modal.png', fullPage: true });
 
   await browser.close();
