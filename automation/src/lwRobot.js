@@ -44,6 +44,19 @@ function deriveBaseUrl(adminUrl) {
 }
 
 /**
+ * Allowlist de segurança: em quais cursos o robô tem permissão de escrever.
+ * Recebe o valor bruto de LW_ALLOWED_COURSE_IDS (string CSV) em vez de ler
+ * `process.env` direto, pra ficar testável sem mockar ambiente.
+ */
+export function isCourseAllowed(courseTitleId, allowedCourseIdsRaw) {
+  const allowedCourseIds = (allowedCourseIdsRaw || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return allowedCourseIds.includes(courseTitleId);
+}
+
+/**
  * `page.waitForLoadState('networkidle')` pode nunca resolver nesse painel
  * (observado na prática): parece haver polling/analytics contínuo em
  * segundo plano que mantém requisições em voo mesmo depois da navegação
@@ -299,6 +312,12 @@ async function withRobotSession(fn) {
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 export async function updateEmbedUnit({ adminUrl, email, password, courseTitleId, unitName, html }) {
+  if (!isCourseAllowed(courseTitleId, process.env.LW_ALLOWED_COURSE_IDS)) {
+    return {
+      ok: false,
+      error: `courseTitleId "${courseTitleId}" não está na allowlist (LW_ALLOWED_COURSE_IDS). Recusando escrever automaticamente — confirme manualmente antes de liberar esse curso.`,
+    };
+  }
   try {
     const baseUrl = deriveBaseUrl(adminUrl);
     await withRobotSession(async (page) => {
