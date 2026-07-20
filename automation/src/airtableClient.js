@@ -34,6 +34,22 @@ export async function getAulaLwUnitUrl(aulaRecordId) {
 }
 
 /**
+ * @param {string} aulaRecordId
+ * @returns {Promise<string|null>}
+ */
+export async function getAulaLwUnitName(aulaRecordId) {
+  const base = getBase();
+  let record;
+  try {
+    record = await base('Aulas').find(aulaRecordId);
+  } catch (err) {
+    if (err && err.error === 'NOT_FOUND') return null;
+    throw err;
+  }
+  return record.fields['LW Unit Name'] || null;
+}
+
+/**
  * @param {string} eventoCursoRecordId
  * @returns {Promise<string|null>}
  */

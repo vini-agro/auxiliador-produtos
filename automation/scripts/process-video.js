@@ -3,7 +3,7 @@ import 'dotenv/config';
 import { parseVideoName } from '../src/parseVideoName.js';
 import { ddmmyyyyToIso } from '../src/formatDate.js';
 import { generateEmbedHtml } from '../src/generateEmbedHtml.js';
-import { findOpEventoByDate, getAulaLwUnitUrl, getLinkCsat } from '../src/airtableClient.js';
+import { findOpEventoByDate, getAulaLwUnitUrl, getAulaLwUnitName, getLinkCsat } from '../src/airtableClient.js';
 import { updateEmbedUnit } from '../src/lwRobot.js';
 import { formatResultLine } from '../src/resultReporter.js';
 
@@ -58,6 +58,14 @@ try {
     process.exit(0);
   }
 
+  const unitName = await getAulaLwUnitName(aulaIds[0]);
+  if (!unitName) {
+    const reason = `Aula sem "LW Unit Name" cadastrado ainda: ${aulaIds[0]}`;
+    console.log(`REVISÃO MANUAL: ${reason}`);
+    console.log(formatResultLine('manual_review', { reason }));
+    process.exit(0);
+  }
+
   if (eventoCursoIds.length === 0) {
     const reason = `evento sem "Evento × Curso" vinculado: ${evento.id}`;
     console.log(`REVISÃO MANUAL: ${reason}`);
@@ -75,7 +83,12 @@ try {
 
   const html = generateEmbedHtml({ vimeoEmbedUrl, csatLink });
 
-  const courseTitleId = lwUnitUrl.split('/courses/')[1]?.split('/')[0];
+  let courseTitleId = null;
+  try {
+    courseTitleId = new URL(lwUnitUrl).searchParams.get('courseid');
+  } catch {
+    courseTitleId = null;
+  }
   if (!courseTitleId) {
     const reason = `não foi possível extrair courseTitleId de "${lwUnitUrl}"`;
     console.log(`REVISÃO MANUAL: ${reason}`);
@@ -89,7 +102,7 @@ try {
     email: process.env.LW_ADMIN_EMAIL,
     password: process.env.LW_ADMIN_PASSWORD,
     courseTitleId,
-    unitName: 'Aula Teste',
+    unitName,
     html,
   });
 
