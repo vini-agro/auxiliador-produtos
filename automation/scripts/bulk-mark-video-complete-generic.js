@@ -66,7 +66,7 @@ async function loginAsAdmin(browser) {
   await page.locator('#submitLogin').click();
   await signinResponsePromise;
   await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-  await page.getByText('Courses & programs').waitFor({ state: 'visible', timeout: 15000 });
+  await page.getByText('Courses & programs').waitFor({ state: 'visible', timeout: 45000 });
 
   await page.getByText('Users', { exact: true }).click();
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
