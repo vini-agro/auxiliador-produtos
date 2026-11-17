@@ -196,6 +196,7 @@ export function mensagemTeams({ concluidas = [], problemas = [], baseUrl }) {
     L.push('', `✅ <b>${esc(c.titulo.split('|').slice(0, 2).join('|').trim())}</b> (${dataCurta(c.dataIso)}) · ${c.turmas} turma(s)`);
     L.push(`Embed com a gravação · ${c.csat === 'link' ? 'botão de CSAT do Agrotable' : 'sem CSAT (aula compartilhada)'} · ${c.pdfs ? `${c.pdfs} PDF(s) anexado(s)` : 'sem PDF na pasta'}`);
     if (!c.veredito) L.push('⚪ Presença ainda não conferida pelo robô: não apague o Zoom ainda.');
+    else if (c.veredito.semZoom) L.push('⚪ Aula sem atividade Zoom (VMIX): nada a apagar, só conferir o vídeo.');
     else if (c.veredito.seguro) L.push('🟢 Presença passada para o Embed em todas as turmas: pode conferir e apagar o Zoom manualmente.');
     else L.push(`🔴 Não apague o Zoom ainda: ${esc(c.veredito.motivos.join('; '))}`);
     L.push(`<a href="${admin}">Abrir ${esc(c.slugAdmin)} no admin da LW</a> (a sincronização leva a troca para as outras turmas)`);

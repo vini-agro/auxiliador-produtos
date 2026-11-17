@@ -139,7 +139,7 @@ async function passoMaterial({ page, ev, destino, arquivos, L, precisa }) {
 // turma a turma e diz se o Zoom estaria seguro para apagar. NUNCA apaga.
 async function passoPresenca({ page, g, ev, planos, destino, teste, L, precisa }) {
   const comZoom = planos.filter((p) => p.plano.zoom && destino.embeds[p.t.courseid]);
-  if (!comZoom.length) { L.push('   · presenca: sem atividade Zoom (VMIX ou Zoom ja apagado), nada a passar'); return { seguro: true, motivos: [] }; }
+  if (!comZoom.length) { L.push('   · presenca: sem atividade Zoom (VMIX ou Zoom ja apagado), nada a passar'); return { seguro: true, motivos: [], semZoom: true }; }
   const tituloZoom = comZoom[0].plano.zoom.titulo;
   let presencaZoom;
   try {

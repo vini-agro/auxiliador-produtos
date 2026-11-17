@@ -208,3 +208,10 @@ test('mensagemTeams: aula concluida com link de admin e problemas novos; nada no
   assert.match(semPresenca, /presen.a ainda n.o conferida/i);
   assert.equal(mensagemTeams({ concluidas: [], problemas: [], baseUrl: base }), null);
 });
+
+test('mensagemTeams: aula sem Zoom (VMIX) nao fala em apagar Zoom', async () => {
+  const { mensagemTeams } = await import('../src/trocaGravacao.js');
+  const m = mensagemTeams({ concluidas: [{ titulo: 'LGE, GTC, MEA | Segmentacao | Adelino', dataIso: '2026-11-16', turmas: 12, csat: 'compartilhada', pdfs: 1, veredito: { seguro: true, motivos: [], semZoom: true }, slugAdmin: 'mba-x-11' }], problemas: [], baseUrl: 'https://x' });
+  assert.match(m, /sem atividade Zoom/i);
+  assert.doesNotMatch(m, /apagar o Zoom manualmente/);
+});
