@@ -20,6 +20,7 @@ import {
 } from '../src/trocaGravacao.js';
 import { generateEmbedHtml } from '../src/generateEmbedHtml.js';
 import { lerCaminho, montarPlano, dataBr, chaveDaPasta } from '../src/materiaisAula.js';
+import { turmasQueNaoComecaram, semTurmasFuturas, textoPuladas } from '../src/turmasFuturas.js';
 
 const SAIDA = path.join(process.cwd(), 'troca-gravacao');
 const TRAVA = path.join(process.cwd(), '.troca-gravacao.lock');
@@ -225,7 +226,15 @@ async function principal() {
   if (!gravacoes.length) { L.push('', 'Nenhuma gravacao editada (_ED) nova nessa janela.'); return; }
 
   // 2. Teamup, Agrotable e pasta Share
-  const eventos = teste ? [teste.evento] : await eventosTeamup(inicio, fim);
+  // turma que ainda nao comecou (ex. lote fev/2027) fica de fora
+  let eventos = teste ? [teste.evento] : await eventosTeamup(inicio, fim);
+  if (!teste) {
+    const { futuras, origem, erro: erroFuturas } = await turmasQueNaoComecaram();
+    if (erroFuturas) L.push(`aviso: turmas futuras (${origem}): ${erroFuturas}`);
+    const r = semTurmasFuturas(eventos, futuras);
+    eventos = r.eventos;
+    if (r.pulados.length) L.push(`Turmas que ainda nao comecaram, puladas: ${textoPuladas(r.pulados)}`);
+  }
   let agrotable = null;
   let erroAgrotable = null;
   if (!teste) try {
@@ -248,6 +257,7 @@ async function principal() {
       if (r.erro) { L.push(`   ❌ ${r.erro}`); precisa.push(`${g.nome}: ${r.erro}`); continue; }
       const ev = r.evento;
       L.push(`   📅 Teamup: ${ev.titulo} (${dataBr(g.dataIso)}) · ${ev.turmas.length} turma(s)`);
+      if (!ev.turmas.length && ev.turmasPuladas) { L.push('   · so turma que ainda nao comecou: pulada'); continue; }
       if (!ev.turmas.length) { L.push('   ❌ evento sem link de turma da LW'); precisa.push(`${ev.titulo}: sem link de turma no Teamup`); continue; }
 
       // escopo B2C pela 1a turma (aula sincronizada = mesmo tipo de curso)

@@ -14,6 +14,7 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { eventosTeamup as eventosDoTeamup, abrirLw, unitsDoCurso, pastaShareNoOneDrive, caminhosDaPasta } from '../src/trocaGravacaoFontes.js';
 import { lerCaminho, montarPlano, dataBr, escolherAtividades } from '../src/materiaisAula.js';
+import { turmasQueNaoComecaram, semTurmasFuturas, textoPuladas } from '../src/turmasFuturas.js';
 
 const SAIDA = path.join(process.cwd(), 'simulacao-materiais');
 
@@ -64,6 +65,7 @@ function relatorio(plano, unitsPorCurso) {
     if (!item.eventos.length) { L.push('   ❌ nenhuma aula no Teamup casou com essa pasta nessa data'); contagem.problema++; continue; }
     for (const ev of item.eventos) {
       L.push(`   📅 Teamup: ${ev.titulo}`);
+      if (!ev.turmas.length && ev.turmasPuladas) { L.push('      · so turma que ainda nao comecou: pulada'); continue; }
       if (!ev.turmas.length) { L.push('      ❌ evento sem link de aula da LW nos comentarios'); contagem.problema++; continue; }
       if (!pdfs.length) { L.push('      ❌ pasta sem PDF para subir'); contagem.problema++; }
       for (const dest of destinos(ev, plano.data, unitsPorCurso)) {
@@ -110,6 +112,7 @@ function resumoTeams(planos, unitsPorCurso) {
         if (sobe) partes.push(`<b>anexaria ${sobe}</b>`);
         if (ja) partes.push(`${ja} já estavam`);
         if (!pdfs.length) partes.push('❌ sem PDF na pasta');
+        if (!ev.turmas.length && ev.turmasPuladas) { push(`· só turma que ainda não começou: ${ev.titulo.split('|').slice(0, 2).join('|').trim()}`, true); continue; }
         if (!ev.turmas.length) partes.push('❌ sem link LW no Teamup');
         if (erro) partes.push(`❌ ${erro} atividade(s) não achada(s)`);
         if (fora.length) partes.push(`${fora.length} arquivo(s) fora da regra`);
@@ -138,7 +141,10 @@ try {
   const raiz = arg('--pasta') || process.env.MATERIAIS_PASTA || pastaShareNoOneDrive();
   const caminhos = listagem ? caminhosDaListagem(listagem) : caminhosDaPasta(raiz);
   const materiais = caminhos.map(lerCaminho).filter(Boolean);
-  const eventos = await eventosDoTeamup(datas[0], datas[datas.length - 1]);
+  // turma que ainda nao comecou (ex. lote fev/2027) nao recebe material
+  const { futuras, origem, erro: erroFuturas } = await turmasQueNaoComecaram();
+  if (erroFuturas) console.log(`aviso: turmas futuras (${origem}): ${erroFuturas}`);
+  const { eventos, pulados } = semTurmasFuturas(await eventosDoTeamup(datas[0], datas[datas.length - 1]), futuras);
   const planos = datas.map((d) => montarPlano(materiais, eventos, d));
 
   const slugs = new Set(planos.flatMap((p) => p.itens.flatMap((i) => i.eventos.flatMap((e) => e.turmas.map((t) => t.courseid)))));
@@ -153,7 +159,9 @@ try {
     }
   }
 
-  const texto = [`SIMULACAO de materiais (nada foi gravado na LW) · rodada ${new Date().toLocaleString('pt-BR')} · fonte: ${listagem || raiz}`, ...planos.map((p) => relatorio(p, unitsPorCurso))].join('\n\n');
+  const cabecalho = [`SIMULACAO de materiais (nada foi gravado na LW) · rodada ${new Date().toLocaleString('pt-BR')} · fonte: ${listagem || raiz}`];
+  if (pulados.length) cabecalho.push(`Turmas que ainda nao comecaram, puladas: ${textoPuladas(pulados)}`);
+  const texto = [cabecalho.join('\n'), ...planos.map((p) => relatorio(p, unitsPorCurso))].join('\n\n');
   console.log(texto);
   fs.mkdirSync(SAIDA, { recursive: true });
   const carimbo = `${isoLocal(hoje)}_${String(hoje.getHours()).padStart(2, '0')}${String(hoje.getMinutes()).padStart(2, '0')}`;
