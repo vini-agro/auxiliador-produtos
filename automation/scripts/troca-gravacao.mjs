@@ -23,6 +23,20 @@ import { lerCaminho, montarPlano, dataBr, chaveDaPasta } from '../src/materiaisA
 
 const SAIDA = path.join(process.cwd(), 'troca-gravacao');
 const TRAVA = path.join(process.cwd(), '.troca-gravacao.lock');
+
+// --log <arquivo>: o proprio robo acrescenta no log, abrindo e fechando a cada linha. Com o ">>" do
+// .cmd o arquivo ficava preso a rodada inteira e, quando o PC volta da suspensao e o agendador solta
+// 10h e 13h juntas, a segunda morria sem deixar rastro (18/nov/2026).
+const LOG = process.argv.includes('--log') ? path.resolve(process.argv[process.argv.indexOf('--log') + 1]) : null;
+if (LOG) {
+  for (const nivel of ['log', 'error']) {
+    const original = console[nivel].bind(console);
+    console[nivel] = (...partes) => {
+      original(...partes);
+      try { fs.appendFileSync(LOG, partes.map((p) => (typeof p === 'string' ? p : String(p))).join(' ') + '\n'); } catch { /* log ocupado: segue */ }
+    };
+  }
+}
 const DIAS_PARA_TRAS = 7;
 
 const args = process.argv.slice(2);
