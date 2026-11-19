@@ -13,7 +13,7 @@ import { execFileSync } from 'child_process';
 import { chromium } from 'playwright';
 import {
   gravacoesRecentes, eventosTeamup, abrirTunelAgrotable, eventosAgrotable, abrirLw, unitsDoCurso,
-  categoriasDoCurso, htmlDoEmbed, pastaShareNoOneDrive, caminhosDaPasta, estruturaV2, dispararPresencaZoom, idInternoDoCurso, avisarNoTeams,
+  categoriasDoCurso, htmlDoEmbed, pastaShareNoOneDrive, caminhosDaPasta, estruturaV2, dispararPresencaZoom, idInternoDoCurso, avisarNoTeams, joiaNaGravacao,
 } from '../src/trocaGravacaoFontes.js';
 import {
   escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada, decidirCsat, eventoDaAula, planoDaAula, compararEstrutura, presencaDaAula, veredito, podeAssumirTrava, mensagemTeams, revisarPendente, ehEquipe, semEquipeNaRevisao,
@@ -112,6 +112,8 @@ async function passoEmbed({ g, ev, planos, decisao, L, precisa }) {
     const saida = rodar('claude-embed-criar.mjs', [t.courseid, String(iSec + 1), plano.zoom.titulo, arq, pasta], { SALVAR: '1', SEC_TXT: antes[t.courseid][iSec].title });
     const idNovo = ((saida.match(/^UNIT ([A-Za-z0-9]+)/m) || [])[1] || '').trim();
     if (!idNovo) throw new Error('Embed criado mas nao achei o id novo');
+    const icone = (saida.match(/^ICONE FALHOU: (.*)$/m) || [])[1];
+    if (icone) precisa.push(`${ev.titulo}: Embed criado, mas nao troquei o icone para o player (${icone}); trocar a mao em ${t.courseid}`);
     rodar('claude-lw-mover-unit.mjs', [t.courseid, idNovo, plano.zoom.id, pasta]);
     await new Promise((ok) => setTimeout(ok, 15000));
     const depois = {};
@@ -329,6 +331,16 @@ async function principal() {
       // concluida = gravou algo, Embed existe e nenhum passo ligado deixou pendencia (Zoom nao seguro e' pendencia)
       if (gravar.size && destino && precisa.length === precisaAntes) {
         concluidas.push({ chave, titulo: ev.titulo, dataIso: g.dataIso, turmas: planos.length, csat: decisao.tipo, pdfs: arquivos.length, veredito: v, slugAdmin: Object.keys(destino.embeds)[0] });
+        // aula concluida: joia na mensagem do Teams onde a gravacao foi postada
+        if (!teste) {
+          try {
+            const j = await joiaNaGravacao(g.id);
+            L.push(`   👍 joia na mensagem da gravacao no Teams (${j.de || 'autor ?'}, ${j.criado ? new Date(j.criado).toLocaleString('pt-BR') : '?'})`);
+          } catch (e) {
+            L.push(`   ❌ joia no Teams: ${e.message}`);
+            precisa.push(`${g.nome}: aula concluida, mas nao pus o joia no Teams (${e.message}); por a mao`);
+          }
+        }
       }
     } catch (e) {
       // uma aula com erro nao derruba as outras

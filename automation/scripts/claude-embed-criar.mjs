@@ -57,6 +57,17 @@ try {
   const ta = fr.locator('textarea[data-key="embed"]');
   await ta.waitFor({ state: 'visible', timeout: 20000 });
   await ta.click(); await ta.fill(HTML); await ta.press('Tab'); await page.waitForTimeout(500);
+  // icone da aula = player ("video"), como nos Embeds feitos a mao; falha aqui nao derruba o Embed
+  try {
+    const wrap = fr.locator('.lrn-path-cont-icon-wrapper:visible').first();
+    const campo = wrap.locator('input[data-key="icon"]');
+    if ((await campo.inputValue()) !== 'video') {
+      await wrap.locator('.js-icon').click(); await page.waitForTimeout(600);
+      await wrap.locator('.js-icon-select img[data-img="video"]').click(); await page.waitForTimeout(400);
+    }
+    const v = await campo.inputValue();
+    console.log(v === 'video' ? 'ICONE video' : 'ICONE FALHOU: ficou ' + v);
+  } catch (e) { console.log('ICONE FALHOU: ' + e.message.split('\n')[0]); }
   await fr.locator('[data-testid="course-content-authoring--edit-form--save-button"]').click();
   await confirmarSync('Save');
   await page.waitForTimeout(6000);

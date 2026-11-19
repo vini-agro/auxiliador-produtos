@@ -257,6 +257,18 @@ export async function idInternoDoCurso(page, slug) {
 }
 
 // ---------- Teams (mesmo webhook e chat do revisor de CSAT) ----------
+// Joia (👍) na mensagem do grupo do Teams onde a gravacao foi postada (link vimeo.com/<id>).
+// Fluxo n8n "Troca gravacao | Joia no Teams", conta noreply; mesmo header do revisor de CSAT.
+export async function joiaNaGravacao(vimeoId) {
+  const { TROCA_JOIA_WEBHOOK: url, TROCA_JOIA_CHAT_ID: chatId, REVISOR_CSAT_TEAMS_HEADER_NOME: hn, REVISOR_CSAT_TEAMS_HEADER_VALOR: hv } = process.env;
+  if (!url || !chatId || !hn || !hv) throw new Error('faltam TROCA_JOIA_WEBHOOK/TROCA_JOIA_CHAT_ID no .env');
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', [hn]: hv }, body: JSON.stringify({ vimeoId: String(vimeoId), chatId }), signal: AbortSignal.timeout(120000) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`n8n respondeu ${r.status}`);
+  if (!j.achou) throw new Error(`nao achei a mensagem com vimeo.com/${vimeoId} no grupo (li ${j.mensagensLidas ?? '?'} mensagens)`);
+  return j;
+}
+
 export async function avisarNoTeams(mensagem) {
   const { REVISOR_CSAT_TEAMS_WEBHOOK: webhook, REVISOR_CSAT_TEAMS_CHAT_ID: chatId, REVISOR_CSAT_TEAMS_HEADER_NOME: hn, REVISOR_CSAT_TEAMS_HEADER_VALOR: hv } = process.env;
   if (!webhook || !chatId || !hn || !hv) throw new Error('faltam dados do Teams no .env');
