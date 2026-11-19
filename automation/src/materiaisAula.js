@@ -160,3 +160,35 @@ export function montarPlano(materiais, eventos, dataIso, apelidos = APELIDOS_DE_
   const eventosSemPasta = doDia.filter((e) => !usados.has(e));
   return { data: dataIso, itens, eventosSemPasta };
 }
+
+const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * Aviso do 📎 Robô Materiais no Teams (HTML com <br>): PDFs anexados nesta rodada, por aula, com o
+ * link de admin de uma turma, e problemas ainda nao avisados. Nada novo = null.
+ */
+export function mensagemMateriais({ anexados = [], problemas = [], baseUrl }) {
+  if (!anexados.length && !problemas.length) return null;
+  const L = ['<b>📎 Robô Materiais</b> · material das aulas anexado na LW'];
+  for (const a of anexados) {
+    L.push('', `➕ <b>${esc(a.titulo.split('|').slice(0, 2).join('|').trim())}</b> (${dataBr(a.dataIso)}) · ${a.turmas} turma(s)`);
+    for (const f of a.arquivos) L.push(`· ${esc(f)}`);
+    L.push(`<a href="${baseUrl}/author/course?courseid=${a.slugAdmin}&tab=contents">Abrir ${esc(a.slugAdmin)} no admin da LW</a>`);
+  }
+  if (problemas.length) L.push('', '<b>⚠ Precisa de você</b>', ...problemas.map((p) => `· ${esc(p)}`));
+  return L.join('<br>');
+}
+
+/** Nucleo do nome do arquivo: sem "2-" da LW, sem data no inicio (161126, 16.11.26), sem acento/separador/caixa. */
+export function nucleoDoArquivo(nome) {
+  return normalizar(String(nome || '').replace(/\.[^.]+$/, ''))
+    .replace(/^\d+-(?=\d{2})/, '') // "2-161126..." (nome repetido no storage)
+    .replace(/^\d{2}[.\-]?\d{2}[.\-]?(\d{4}|\d{2})(?!\d)/, '') // data no inicio
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+/** O PDF ja esta anexado, mesmo que alguem tenha subido com o nome mexido (18/nov: "161126 - X.pdf" x "161126_X.pdf")? */
+export function jaTemArquivo(anexos, nome) {
+  const alvo = nucleoDoArquivo(nome);
+  return !!alvo && (anexos || []).some((a) => nucleoDoArquivo(a) === alvo);
+}

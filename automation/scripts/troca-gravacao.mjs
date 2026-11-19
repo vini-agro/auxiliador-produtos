@@ -19,7 +19,7 @@ import {
   escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada, decidirCsat, eventoDaAula, planoDaAula, compararEstrutura, presencaDaAula, veredito, podeAssumirTrava, mensagemTeams, ehEquipe, semEquipeNaRevisao,
 } from '../src/trocaGravacao.js';
 import { generateEmbedHtml } from '../src/generateEmbedHtml.js';
-import { lerCaminho, montarPlano, dataBr, chaveDaPasta } from '../src/materiaisAula.js';
+import { lerCaminho, montarPlano, dataBr, chaveDaPasta, jaTemArquivo } from '../src/materiaisAula.js';
 import { turmasQueNaoComecaram, semTurmasFuturas, textoPuladas } from '../src/turmasFuturas.js';
 
 const SAIDA = path.join(process.cwd(), 'troca-gravacao');
@@ -135,7 +135,7 @@ async function passoMaterial({ page, ev, destino, arquivos, L, precisa }) {
   const pasta = path.join(SAIDA, 'prints');
   fs.mkdirSync(pasta, { recursive: true });
   const u0 = ((await unitsDoCurso(page, slug0)) || new Map()).get(destino.embeds[slug0]);
-  const faltam = arquivos.filter((a) => !(u0 ? u0.anexos : []).includes(path.basename(a)));
+  const faltam = arquivos.filter((a) => !jaTemArquivo(u0 ? u0.anexos : [], path.basename(a)));
   try {
     for (const a of faltam) rodar('anexar-material.mjs', [slug0, destino.titulo, a, pasta], { SALVAR: '1', CONFIRMAR_SYNC: '1', UNIT_ID: destino.embeds[slug0] });
   } catch (e) { precisa.push(`${ev.titulo}: passo material parou: ${e.message}`); L.push(`   ❌ passo material parou: ${e.message}`); return; }
@@ -143,7 +143,7 @@ async function passoMaterial({ page, ev, destino, arquivos, L, precisa }) {
   const sem = [];
   for (const s of slugs) {
     const u = ((await unitsDoCurso(page, s)) || new Map()).get(destino.embeds[s]);
-    const falta = arquivos.filter((a) => !(u ? u.anexos : []).includes(path.basename(a)));
+    const falta = arquivos.filter((a) => !jaTemArquivo(u ? u.anexos : [], path.basename(a)));
     if (falta.length) sem.push(`${s} (${falta.length})`);
   }
   if (sem.length) { precisa.push(`${ev.titulo}: material nao chegou em ${sem.join(', ')}`); L.push(`   ❌ material nao chegou em ${sem.join(', ')}`); }
@@ -297,7 +297,7 @@ async function principal() {
         }
         if (plano.embed) plano = planoDaAula(new Map([...units].map(([id, u]) => [id, id === plano.embed.id ? { ...u, html: htmlLido } : u])), ev.titulo, g.dataIso, t.unit);
         const destino = plano.embed || plano.zoom;
-        const faltam = destino ? pdfs.filter((p) => !(plano.embed ? plano.embed.anexos : []).includes(p)) : pdfs;
+        const faltam = destino ? pdfs.filter((p) => !jaTemArquivo(plano.embed ? plano.embed.anexos : [], p)) : pdfs;
         const acao = {
           'criar-embed': `criaria Embed abaixo do Zoom ${plano.zoom && plano.zoom.id}`,
           'trocar-video': `trocaria o video do Embed ${plano.embed && plano.embed.id}`,

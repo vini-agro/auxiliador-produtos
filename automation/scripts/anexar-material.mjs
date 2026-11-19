@@ -6,6 +6,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
+import { jaTemArquivo } from '../src/materiaisAula.js';
 
 const [, , SLUG, TITULO, ARQUIVO, OUT = '.'] = process.argv;
 if (!SLUG || !TITULO || !ARQUIVO) throw new Error('uso: <slug> "<titulo>" "<arquivo>" [pastaPrints]');
@@ -41,7 +42,7 @@ try {
   const antes = await anexosAtuais(page);
   console.log('ANTES:', JSON.stringify(antes));
   if (antes.length !== 1) throw new Error(`esperava 1 atividade com esse titulo, achei ${antes.length}`);
-  if (antes[0].anexos.includes(NOME)) { console.log('JA TEM esse anexo, nada a fazer'); process.exit(0); }
+  if (jaTemArquivo(antes[0].anexos, NOME)) { console.log('JA TEM esse anexo, nada a fazer'); process.exit(0); }
   if (!process.env.SALVAR) { console.log('(sem SALVAR=1: nao subi)'); process.exit(0); }
 
   const fr = page.frames().find((f) => f.url().includes('/author/course?courseid=') && f.url().includes('_referrer=admin'));

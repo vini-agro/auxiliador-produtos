@@ -90,3 +90,31 @@ test('montarPlano: casa pasta com evento e lista o que sobrou dos dois lados', (
   assert.deepEqual(plano.itens[0].arquivos.filter((a) => a.sobe).map((a) => a.arquivo), ['171126_Sistema imune.pdf']);
   assert.deepEqual(plano.eventosSemPasta.map((e) => e.titulo), ['PSM | Ecofisiologia | Mazzafera']);
 });
+
+test('mensagemMateriais: lista o que foi anexado com link de admin e problemas novos; nada = null', async () => {
+  const { mensagemMateriais } = await import('../src/materiaisAula.js');
+  const base = 'https://plataforma.agroadvance.com.br';
+  const m = mensagemMateriais({
+    anexados: [{ titulo: 'GPA | Planejamento Sucessorio | Melina', dataIso: '2026-11-16', arquivos: ['161126 - Planejamento.pdf'], turmas: 4, slugAdmin: 'mba-gestao-propriedade-agricolas-7' }],
+    problemas: ['B2B/Agrichem/16.11.26: nenhuma aula no Teamup nessa data'],
+    baseUrl: base,
+  });
+  assert.match(m, /📎 Robô Materiais/);
+  assert.match(m, /GPA \| Planejamento Sucessorio/);
+  assert.match(m, /16\/nov\/2026/);
+  assert.match(m, /161126 - Planejamento\.pdf/);
+  assert.match(m, /4 turma/);
+  assert.match(m, /href="https:\/\/plataforma\.agroadvance\.com\.br\/author\/course\?courseid=mba-gestao-propriedade-agricolas-7&tab=contents"/);
+  assert.match(m, /Precisa de voc/);
+  assert.equal(mensagemMateriais({ anexados: [], problemas: [], baseUrl: base }), null);
+});
+
+test('jaTemArquivo: mesmo material com nome mexido conta como ja anexado', async () => {
+  const { jaTemArquivo } = await import('../src/materiaisAula.js');
+  const anexos = ['161126 - Interpretacao da analise de solo.pdf', '161126 - 31_IA_Setembro_2026.pdf', '2-161126 - Planejamento Sucessorio.pdf'];
+  assert.equal(jaTemArquivo(anexos, '161126_Interpretacao da analise de solo.pdf'), true);
+  assert.equal(jaTemArquivo(anexos, '31_IA_Setembro_2026.pdf'), true);
+  assert.equal(jaTemArquivo(anexos, '161126 - Planejamento Sucessório.pdf'), true);
+  assert.equal(jaTemArquivo(anexos, '161126_Outra aula.pdf'), false);
+  assert.equal(jaTemArquivo([], 'a.pdf'), false);
+});

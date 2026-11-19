@@ -13,7 +13,18 @@ import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
 import { eventosTeamup as eventosDoTeamup, abrirLw, unitsDoCurso, pastaShareNoOneDrive, caminhosDaPasta } from '../src/trocaGravacaoFontes.js';
-import { lerCaminho, montarPlano, dataBr, escolherAtividades } from '../src/materiaisAula.js';
+import { lerCaminho, montarPlano, dataBr, escolherAtividades, chaveDaPasta, mensagemMateriais, jaTemArquivo } from '../src/materiaisAula.js';
+import { podeAssumirTrava } from '../src/trocaGravacao.js';
+import { execFileSync } from 'child_process';
+
+// --log <arquivo>: o robo acrescenta no log linha a linha, sem prender o arquivo (rodadas que se encontram nao se derrubam)
+if (process.argv.includes('--log')) {
+  const LOG = path.resolve(process.argv[process.argv.indexOf('--log') + 1]);
+  for (const nivel of ['log', 'error']) {
+    const original = console[nivel].bind(console);
+    console[nivel] = (...partes) => { original(...partes); try { fs.appendFileSync(LOG, partes.map(String).join(' ') + '\n'); } catch { /* ocupado */ } };
+  }
+}
 import { turmasQueNaoComecaram, semTurmasFuturas, textoPuladas } from '../src/turmasFuturas.js';
 
 const SAIDA = path.join(process.cwd(), 'simulacao-materiais');
@@ -73,7 +84,7 @@ function relatorio(plano, unitsPorCurso) {
         for (const u of dest.atividades) {
           L.push(`      → ${dest.courseid} · "${u.titulo}" (${u.tipo}, ${u.qtd ?? u.anexos.length} anexo(s) hoje${dest.como !== 'titulo' ? ', achada pelo ' + dest.como : ''})`);
           for (const pdf of pdfs) {
-            if (u.anexos.includes(pdf)) { L.push(`         ✔ ja tem ${pdf}`); contagem.jaTem++; }
+            if (jaTemArquivo(u.anexos, pdf)) { L.push(`         ✔ ja tem ${pdf}`); contagem.jaTem++; }
             else { L.push(`         + anexaria ${pdf}`); contagem.sobe++; }
           }
         }
@@ -106,7 +117,7 @@ function resumoTeams(planos, unitsPorCurso) {
         let sobe = 0, ja = 0, erro = 0;
         for (const dest of destinos(ev, plano.data, unitsPorCurso)) {
           if (dest.erro) { erro++; continue; }
-          for (const u of dest.atividades) for (const pdf of pdfs) (u.anexos.includes(pdf) ? ja++ : sobe++);
+          for (const u of dest.atividades) for (const pdf of pdfs) (jaTemArquivo(u.anexos, pdf) ? ja++ : sobe++);
         }
         const partes = [];
         if (sobe) partes.push(`<b>anexaria ${sobe}</b>`);
@@ -134,8 +145,88 @@ async function avisarNoTeams(mensagem) {
   console.log('aviso enviado pro Teams.');
 }
 
+// ---------- gravar (19/nov/2026, pedido do usuario: "liga o robo de materiais para gravar e me avisar") ----------
+const GRAVAR = args.includes('--gravar');
+const TRAVA = path.join(process.cwd(), '.materiais.lock');
+const TRAVA_GRAVACOES = path.join(process.cwd(), '.troca-gravacao.lock');
+const ESTADO = path.join(process.cwd(), '.materiais-estado.json');
+const vivo = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+function pegarTrava() {
+  const nova = JSON.stringify({ pid: process.pid, inicio: Date.now() });
+  for (let i = 0; i < 2; i++) {
+    try { fs.writeFileSync(TRAVA, nova, { flag: 'wx' }); return true; } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    let atual = null;
+    try { atual = fs.readFileSync(TRAVA, 'utf8'); } catch { /* sumiu */ }
+    if (!podeAssumirTrava(atual, { pid: process.pid, agora: Date.now(), vivo })) return false;
+    fs.rmSync(TRAVA, { force: true });
+  }
+  return false;
+}
+function soltarTrava() {
+  try { if (JSON.parse(fs.readFileSync(TRAVA, 'utf8')).pid === process.pid) fs.rmSync(TRAVA, { force: true }); } catch { /* nao e minha */ }
+}
+// o Robo Gravacoes tambem reanexa material: rodando os dois juntos o mesmo PDF podia entrar 2 vezes ("2-<nome>")
+function gravacoesRodando() {
+  try { const t = JSON.parse(fs.readFileSync(TRAVA_GRAVACOES, 'utf8')); return vivo(t.pid); } catch { return false; }
+}
+
+function rodar(script, argumentos, env = {}) {
+  try {
+    return execFileSync(process.execPath, [path.join('scripts', script), ...argumentos], { env: { ...process.env, ...env }, encoding: 'utf8', timeout: 15 * 60000 });
+  } catch (e) {
+    const ultimas = String((e.stdout || '') + (e.stderr || '')).trim().split(String.fromCharCode(10)).map((l) => l.trim()).slice(-3);
+    throw new Error(ultimas.join(' | '));
+  }
+}
+
+// Em cada turma relê a aula na hora e anexa so' o PDF que falta, pelo id da atividade (Zoom e Embed
+// tem o mesmo titulo). Depois de anexar espera a sync levar para as peers antes de ler a proxima turma.
+async function anexarFaltantes({ page, planos, materiais, raiz }) {
+  const anexados = [];
+  const problemas = [];
+  const pasta = path.join(SAIDA, 'prints');
+  fs.mkdirSync(pasta, { recursive: true });
+  for (const plano of planos) for (const item of plano.itens) {
+    if (!item.eventos.length) { problemas.push(`${item.pasta.rotulo}: nenhuma aula no Teamup nessa data`); continue; }
+    const nomes = item.arquivos.filter((a) => a.sobe).map((a) => a.arquivo);
+    if (!nomes.length) continue;
+    const caminhoDe = (nome) => {
+      const m = materiais.find((x) => x.data === plano.data && chaveDaPasta(x) === item.pasta.chave && x.arquivo === nome);
+      return m ? path.join(raiz, m.caminho) : null;
+    };
+    for (const ev of item.eventos) {
+      if (!ev.turmas.length) { if (!ev.turmasPuladas) problemas.push(`${ev.titulo}: sem link de turma da LW no Teamup`); continue; }
+      const feitos = new Set();
+      for (const t of ev.turmas) {
+        const units = await unitsDoCurso(page, t.courseid);
+        if (!units) { problemas.push(`${ev.titulo} · ${t.courseid}: nao consegui ler o curso`); continue; }
+        // sem atividade (Zoom apagado e gravacao ainda nao entrou): fica para a proxima rodada
+        const { atividades } = escolherAtividades(units, ev.titulo, plano.data, t.unit);
+        let anexouAqui = false;
+        for (const u of atividades) for (const nome of nomes) {
+          if (jaTemArquivo(u.anexos, nome)) continue;
+          const arq = caminhoDe(nome);
+          if (!arq) continue;
+          try {
+            rodar('anexar-material.mjs', [t.courseid, u.titulo, arq, pasta], { SALVAR: '1', CONFIRMAR_SYNC: '1', UNIT_ID: u.id });
+            feitos.add(nome);
+            anexouAqui = true;
+            console.log(`anexado: ${nome} em ${t.courseid} (${u.id})`);
+          } catch (e) { problemas.push(`${ev.titulo} · ${t.courseid}: anexo de ${nome} falhou: ${e.message}`); }
+        }
+        if (anexouAqui) await new Promise((ok) => setTimeout(ok, 15000));
+      }
+      if (feitos.size) anexados.push({ titulo: ev.titulo, dataIso: plano.data, arquivos: [...feitos], turmas: ev.turmas.length, slugAdmin: ev.turmas[0].courseid });
+    }
+  }
+  return { anexados, problemas };
+}
+
 // ---------- main ----------
 const comTeams = args.includes('--teams');
+if (GRAVAR && gravacoesRodando()) { console.log(new Date().toISOString(), 'Robo Gravacoes rodando agora: pulei esta rodada'); process.exit(0); }
+if (GRAVAR && !pegarTrava()) { console.log(new Date().toISOString(), 'outra rodada do Robo Materiais em andamento, saindo'); process.exit(0); }
 try {
   const listagem = arg('--listagem');
   const raiz = arg('--pasta') || process.env.MATERIAIS_PASTA || pastaShareNoOneDrive();
@@ -149,17 +240,23 @@ try {
 
   const slugs = new Set(planos.flatMap((p) => p.itens.flatMap((i) => i.eventos.flatMap((e) => e.turmas.map((t) => t.courseid)))));
   const unitsPorCurso = new Map();
+  let resultado = { anexados: [], problemas: [] };
+  if (GRAVAR && listagem) throw new Error('--gravar precisa da pasta de verdade (nao funciona com --listagem)');
   if (slugs.size && !args.includes('--sem-lw')) {
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await abrirLw(browser);
+      if (GRAVAR) resultado = await anexarFaltantes({ page, planos, materiais, raiz });
+      // relatorio com o estado DEPOIS de anexar
       for (const s of slugs) unitsPorCurso.set(s, await unitsDoCurso(page, s));
     } finally {
       await browser.close();
     }
   }
 
-  const cabecalho = [`SIMULACAO de materiais (nada foi gravado na LW) · rodada ${new Date().toLocaleString('pt-BR')} · fonte: ${listagem || raiz}`];
+  const cabecalho = [`${GRAVAR ? `MATERIAIS · GRAVANDO (${resultado.anexados.reduce((n, a) => n + a.arquivos.length, 0)} PDF(s) anexado(s) nesta rodada)` : 'SIMULACAO de materiais (nada foi gravado na LW)'} · rodada ${new Date().toLocaleString('pt-BR')} · fonte: ${listagem || raiz}`];
+  for (const a of resultado.anexados) cabecalho.push(`ANEXADO: ${a.titulo} (${dataBr(a.dataIso)}): ${a.arquivos.join(', ')}`);
+  for (const p of resultado.problemas) cabecalho.push(`PROBLEMA: ${p}`);
   if (pulados.length) cabecalho.push(`Turmas que ainda nao comecaram, puladas: ${textoPuladas(pulados)}`);
   const texto = [cabecalho.join('\n'), ...planos.map((p) => relatorio(p, unitsPorCurso))].join('\n\n');
   console.log(texto);
@@ -167,10 +264,24 @@ try {
   const carimbo = `${isoLocal(hoje)}_${String(hoje.getHours()).padStart(2, '0')}${String(hoje.getMinutes()).padStart(2, '0')}`;
   fs.writeFileSync(path.join(SAIDA, `${carimbo}.txt`), texto, 'utf8');
   if (args.includes('--mostrar-teams')) console.log('\n--- mensagem do Teams ---\n' + resumoTeams(planos, unitsPorCurso).replace(/<br>/g, '\n'));
-  if (comTeams) await avisarNoTeams(resumoTeams(planos, unitsPorCurso));
+  if (comTeams && !GRAVAR) await avisarNoTeams(resumoTeams(planos, unitsPorCurso));
+  if (comTeams && GRAVAR) {
+    // anexados sempre; problema so' na 1a vez que aparece
+    let estado = { problemas: {} };
+    try { estado = { problemas: {}, ...JSON.parse(fs.readFileSync(ESTADO, 'utf8')) }; } catch { /* primeira vez */ }
+    const novos = [...new Set(resultado.problemas)].filter((p) => !estado.problemas[p]);
+    const msg = mensagemMateriais({ anexados: resultado.anexados, problemas: novos, baseUrl: process.env.LW_ADMIN_URL.replace(/\/admin\/?$/, '') });
+    if (msg) {
+      await avisarNoTeams(msg);
+      for (const p of novos) estado.problemas[p] = new Date().toLocaleString('pt-BR');
+      fs.writeFileSync(ESTADO, JSON.stringify(estado, null, 1));
+    }
+  }
 } catch (erro) {
   console.error(new Date().toISOString(), 'ERRO:', erro.message);
   // falha calada = ninguem percebe que o robo parou (licao do revisor de CSAT)
-  if (comTeams) await avisarNoTeams(`❌ Simulação de materiais NÃO rodou: ${erro.message}`).catch(() => {});
+  if (comTeams) await avisarNoTeams(`❌ <b>📎 Robô Materiais</b> · a rodada NÃO rodou: ${erro.message}`).catch(() => {});
   process.exitCode = 1;
+} finally {
+  if (GRAVAR) soltarTrava();
 }
