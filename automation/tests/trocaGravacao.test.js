@@ -2,8 +2,28 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   lerGravacao, escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada,
-  linkCsat, eventoDaAula, planoDaAula, veredito,
+  linkCsat, eventoDaAula, planoDaAula, veredito, ehEquipe, semEquipeNaRevisao,
 } from '../src/trocaGravacao.js';
+
+test('ehEquipe: so e-mail @agroadvance.com.br', () => {
+  assert.equal(ehEquipe('host.teste@agroadvance.com.br'), true);
+  assert.equal(ehEquipe('Alguem@AGROADVANCE.com.br '), true);
+  assert.equal(ehEquipe('aluno@gmail.com'), false);
+  assert.equal(ehEquipe('x@agroadvance.com.br.fake.com'), false);
+  assert.equal(ehEquipe(undefined), false);
+});
+
+test('semEquipeNaRevisao: tira host pelo nome do Zoom, sem acento nem maiuscula', () => {
+  const revisar = [
+    'José Carlos Host Teste (125 min): José Aluno Um -7 / José Carlos Aluno -9',
+    'Ana Lima (90 min): Ana Aluna -8',
+  ];
+  const r = semEquipeNaRevisao(revisar, ['jose carlos host teste', ' ']);
+  assert.deepEqual(r.revisar, ['Ana Lima (90 min): Ana Aluna -8']);
+  assert.equal(r.ignorados.length, 1);
+  assert.deepEqual(semEquipeNaRevisao(revisar, []).revisar, revisar);
+  assert.deepEqual(semEquipeNaRevisao(revisar, ['José Carlos']).revisar, revisar, 'nome parcial nao conta');
+});
 
 test('lerGravacao: so video editado com duracao', () => {
   assert.deepEqual(lerGravacao('AGRICHEM_13112026_ANDRE REIS_O PAPEL DA NUTRICAO_ED', 5400), { sigla: 'AGRICHEM', dataIso: '2026-11-13' });

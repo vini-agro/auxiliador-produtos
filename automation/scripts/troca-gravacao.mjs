@@ -16,7 +16,7 @@ import {
   categoriasDoCurso, htmlDoEmbed, pastaShareNoOneDrive, caminhosDaPasta, estruturaV2, dispararPresencaZoom, idInternoDoCurso, avisarNoTeams,
 } from '../src/trocaGravacaoFontes.js';
 import {
-  escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada, decidirCsat, eventoDaAula, planoDaAula, compararEstrutura, presencaDaAula, veredito, podeAssumirTrava, mensagemTeams,
+  escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada, decidirCsat, eventoDaAula, planoDaAula, compararEstrutura, presencaDaAula, veredito, podeAssumirTrava, mensagemTeams, ehEquipe, semEquipeNaRevisao,
 } from '../src/trocaGravacao.js';
 import { generateEmbedHtml } from '../src/generateEmbedHtml.js';
 import { lerCaminho, montarPlano, dataBr, chaveDaPasta } from '../src/materiaisAula.js';
@@ -160,6 +160,10 @@ async function passoPresenca({ page, g, ev, planos, destino, teste, L, precisa }
   try {
     const saida = await dispararPresencaZoom(g.dataIso, teste ? teste.presencaWebhookExtra || '' : '');
     presencaZoom = presencaDaAula(saida, tituloZoom, g.dataIso);
+    // host/equipe no Zoom nao e' aluno: sai da revisao (nomes no .env TROCA_EQUIPE_ZOOM, separados por ";")
+    const semHost = semEquipeNaRevisao(presencaZoom.revisar, (process.env.TROCA_EQUIPE_ZOOM || '').split(';'));
+    presencaZoom = { ...presencaZoom, revisar: semHost.revisar };
+    if (semHost.ignorados.length) L.push(`   · equipe/host ignorado na revisao: ${semHost.ignorados.map((i) => i.split(' (')[0]).join(', ')}`);
     L.push(`   · robo de Presenca Zoom: execucao ${saida.execucao}${presencaZoom.erro ? ' · ' + presencaZoom.erro : ` · ${presencaZoom.revisar.length} para revisar`}`);
   } catch (e) { presencaZoom = { erro: e.message, revisar: [] }; L.push(`   ❌ robo de Presenca Zoom: ${e.message}`); }
   const pasta = path.join(SAIDA, 'presenca');
@@ -168,7 +172,8 @@ async function passoPresenca({ page, g, ev, planos, destino, teste, L, precisa }
   for (const { t, plano } of comZoom) {
     const embedId = destino.embeds[t.courseid];
     const base = path.join(pasta, `${g.dataIso}-${t.courseid}`);
-    const conferir = () => { rodar('verify-presence-parity.js', [t.courseid, plano.zoom.id, embedId, `${base}-paridade.json`]); return JSON.parse(fs.readFileSync(`${base}-paridade.json`, 'utf8')).missingVideo || []; };
+    // conta da equipe (@agroadvance.com.br, ex. host) nao conta e nao recebe presenca
+    const conferir = () => { rodar('verify-presence-parity.js', [t.courseid, plano.zoom.id, embedId, `${base}-paridade.json`]); return (JSON.parse(fs.readFileSync(`${base}-paridade.json`, 'utf8')).missingVideo || []).filter((u) => !ehEquipe(u.email)); };
     try {
       let faltam = conferir();
       const passados = faltam.length;

@@ -131,6 +131,28 @@ export function planoDaAula(units, tituloEvento, dataIso, unitDoLink = null) {
 }
 
 /** Zoom so estaria seguro para apagar com paridade zerada e o robo de Presenca Zoom sem erro nem revisao. */
+// Hosts e equipe nao sao alunos (usuario, 19/nov/2026: "são hosts, pode ignorar").
+/** Conta da equipe na LW (e-mail @agroadvance.com.br): fora da paridade Zoom x Embed. */
+export function ehEquipe(email) {
+  return /@agroadvance\.com\.br\s*$/i.test(email || '');
+}
+
+/**
+ * Tira da lista "revisar" do robo de Presenca Zoom os participantes da equipe. Cada item e'
+ * "Nome no Zoom (125 min): candidatos..."; `nomesEquipe` = nomes no Zoom (ex. do .env TROCA_EQUIPE_ZOOM,
+ * separados por ";"). Compara sem acento e sem diferenca de maiuscula.
+ */
+export function semEquipeNaRevisao(revisar, nomesEquipe) {
+  const equipe = new Set((nomesEquipe || []).map((n) => normalizar(n).trim()).filter(Boolean));
+  const fica = [];
+  const ignorados = [];
+  for (const item of revisar || []) {
+    const nome = normalizar(String(item).split(/\s*\(\d+\s*min\)/)[0]).trim();
+    (equipe.has(nome) ? ignorados : fica).push(item);
+  }
+  return { revisar: fica, ignorados };
+}
+
 export function veredito({ paridade = [], presencaZoom = {} }) {
   const motivos = [];
   if (presencaZoom.erro) motivos.push(`robo de Presenca Zoom: ${presencaZoom.erro}`);
