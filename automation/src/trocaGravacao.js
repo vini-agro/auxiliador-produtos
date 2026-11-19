@@ -226,3 +226,14 @@ export function mensagemTeams({ concluidas = [], problemas = [], baseUrl }) {
   if (problemas.length) L.push('', '<b>⚠ Precisa de você</b>', ...problemas.map((p) => `· ${esc(p)}`));
   return L.join('<br>');
 }
+
+/**
+ * Itens de "revisar" do robo de Presenca Zoom que ainda dependem do usuario. `decididos` = nomes de
+ * participante do Zoom que o usuario ja resolveu (ex. 19/nov GPA: participante que o usuario disse nao ser o aluno sugerido),
+ * comparados sem acento/caixa pelo trecho antes de " (NN min)".
+ */
+export function revisarPendente(revisar = [], decididos = []) {
+  const chave = (t) => normalizar(String(t).split(' (')[0]);
+  const fora = new Set((decididos || []).map(chave));
+  return revisar.filter((r) => !fora.has(chave(r)));
+}

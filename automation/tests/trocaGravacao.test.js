@@ -235,3 +235,11 @@ test('mensagemTeams: aula sem Zoom (VMIX) nao fala em apagar Zoom', async () => 
   assert.match(m, /sem atividade Zoom/i);
   assert.doesNotMatch(m, /apagar o Zoom manualmente/);
 });
+
+test('revisarPendente: tira da revisao o participante que o usuario ja decidiu', async () => {
+  const { revisarPendente } = await import('../src/trocaGravacao.js');
+  const revisar = ['Aluno Ficticio Um (125 min): Candidato A -7 / Candidato B -8 / Candidato C -9', 'Aluno Ficticio Dois (144 min): Candidato D er / Candidato E er'];
+  assert.deepEqual(revisarPendente(revisar, ['Aluno Fictício Um']), ['Aluno Ficticio Dois (144 min): Candidato D er / Candidato E er']);
+  assert.deepEqual(revisarPendente(revisar, []), revisar);
+  assert.deepEqual(revisarPendente(revisar, undefined), revisar);
+});

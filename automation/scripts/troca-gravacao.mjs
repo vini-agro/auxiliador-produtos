@@ -16,7 +16,7 @@ import {
   categoriasDoCurso, htmlDoEmbed, pastaShareNoOneDrive, caminhosDaPasta, estruturaV2, dispararPresencaZoom, idInternoDoCurso, avisarNoTeams,
 } from '../src/trocaGravacaoFontes.js';
 import {
-  escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada, decidirCsat, eventoDaAula, planoDaAula, compararEstrutura, presencaDaAula, veredito, podeAssumirTrava, mensagemTeams, ehEquipe, semEquipeNaRevisao,
+  escolherGravacao, eventoDaGravacao, ehB2C, aulaCompartilhada, decidirCsat, eventoDaAula, planoDaAula, compararEstrutura, presencaDaAula, veredito, podeAssumirTrava, mensagemTeams, revisarPendente, ehEquipe, semEquipeNaRevisao,
 } from '../src/trocaGravacao.js';
 import { generateEmbedHtml } from '../src/generateEmbedHtml.js';
 import { lerCaminho, montarPlano, dataBr, chaveDaPasta, jaTemArquivo } from '../src/materiaisAula.js';
@@ -160,6 +160,10 @@ async function passoPresenca({ page, g, ev, planos, destino, teste, L, precisa }
   try {
     const saida = await dispararPresencaZoom(g.dataIso, teste ? teste.presencaWebhookExtra || '' : '');
     presencaZoom = presencaDaAula(saida, tituloZoom, g.dataIso);
+    // revisao que o usuario ja decidiu (arquivo local, fora do Git: tem nome de aluno)
+    let decididos = {};
+    try { decididos = JSON.parse(fs.readFileSync(path.join(process.cwd(), ".troca-gravacao-revisar-decididos.json"), "utf8")); } catch { /* sem decisoes */ }
+    presencaZoom.revisar = revisarPendente(presencaZoom.revisar || [], decididos[`${g.sigla}|${g.dataIso}`]);
     // host/equipe no Zoom nao e' aluno: sai da revisao (nomes no .env TROCA_EQUIPE_ZOOM, separados por ";")
     const semHost = semEquipeNaRevisao(presencaZoom.revisar, (process.env.TROCA_EQUIPE_ZOOM || '').split(';'));
     presencaZoom = { ...presencaZoom, revisar: semHost.revisar };
