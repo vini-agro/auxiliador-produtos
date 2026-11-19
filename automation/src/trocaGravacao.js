@@ -212,7 +212,7 @@ const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
  */
 export function mensagemTeams({ concluidas = [], problemas = [], baseUrl }) {
   if (!concluidas.length && !problemas.length) return null;
-  const L = ['<b>🎬 Troca do Zoom pela gravação</b>'];
+  const L = ['<b>🎬 Robô Gravações</b> · troca do Zoom pela gravação'];
   for (const c of concluidas) {
     const admin = `${baseUrl}/author/course?courseid=${c.slugAdmin}&tab=contents`;
     L.push('', `✅ <b>${esc(c.titulo.split('|').slice(0, 2).join('|').trim())}</b> (${dataCurta(c.dataIso)}) · ${c.turmas} turma(s)`);
