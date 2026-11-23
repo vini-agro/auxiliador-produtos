@@ -42,9 +42,12 @@ export function eventoDaGravacao(eventos, sigla, dataIso) {
   return { evento: casados[0] };
 }
 
+/** B2B que segue o mesmo fluxo das pos (gravacao no Embed + CSAT + material). Sanjo: 23/nov/2026. */
+const B2B_COMO_B2C = /^B2B[- ]?SANJO$/;
+
 /** B2C = categoria MBA/Pos-graduacao; sem categoria, slug mba-/pos- (mesma regra do robo de Presenca Zoom). */
 export function ehB2C({ categorias = [], slug = '' }) {
-  if (categorias.length) return categorias.some((c) => /^MBA\b|^POS[- ]?GRADUACAO/.test(normalizar(c)));
+  if (categorias.length) return categorias.some((c) => /^MBA\b|^POS[- ]?GRADUACAO/.test(normalizar(c)) || B2B_COMO_B2C.test(normalizar(c)));
   return /^(mba|pos)-/.test(slug);
 }
 

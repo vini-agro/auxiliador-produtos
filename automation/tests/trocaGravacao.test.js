@@ -61,8 +61,14 @@ test('ehB2C: categoria MBA/Pos ou slug mba-/pos- sem categoria', () => {
   assert.equal(ehB2C({ categorias: ['Pós-graduação'], slug: 'x' }), true);
   assert.equal(ehB2C({ categorias: [], slug: 'pos-graduacao-soja-milho-4' }), true);
   assert.equal(ehB2C({ categorias: [], slug: 'mba-gestao-propriedade-agricolas-7' }), true);
-  assert.equal(ehB2C({ categorias: ['B2B-Sanjo'], slug: 'sanjo' }), false);
+  assert.equal(ehB2C({ categorias: ['B2B-Bayer'], slug: 'uni-agro-bayer' }), false);
   assert.equal(ehB2C({ categorias: [], slug: 'uni-agro-bayer' }), false);
+});
+
+test('ehB2C: Sanjo e B2B mas segue o mesmo fluxo das pos (23/nov/2026)', () => {
+  assert.equal(ehB2C({ categorias: ['B2B-Sanjo'], slug: 'sanjo' }), true);
+  assert.equal(ehB2C({ categorias: ['b2b sanjo'], slug: 'sanjo' }), true);
+  assert.equal(ehB2C({ categorias: ['B2B-Sanjose'], slug: 'x' }), false);
 });
 
 test('aulaCompartilhada: mais de uma sigla na cabeca do titulo', () => {
