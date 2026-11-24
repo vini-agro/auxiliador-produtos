@@ -7,6 +7,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import {
   estadoDaTarefa, estadoDoRobo, faixaTopo, ultimaRodada, resumir, avisouTeams, INICIO_RODADA, montarHtml,
+  ultimoHorarioAgendado, diasDaAgenda, avisoDoDia,
 } from '../src/painelRobos.js';
 
 const RAIZ = process.cwd();
@@ -24,11 +25,20 @@ const ROBOS = [
 // ---------- Agendador (datas em ISO para nao depender do formato pt-BR) ----------
 function lerAgendador(nomes) {
   const lista = nomes.map((n) => `'${n.replace(/'/g, "''")}'`).join(',');
-  const ps = `$ErrorActionPreference='SilentlyContinue'; @(${lista}) | ForEach-Object { $t = Get-ScheduledTask -TaskName $_; if ($t) { $i = $t | Get-ScheduledTaskInfo; [pscustomobject]@{ nome=$t.TaskName; ultima=$i.LastRunTime.ToString('o'); resultado=$i.LastTaskResult; proxima=$(if ($i.NextRunTime) { $i.NextRunTime.ToString('o') } else { '' }); perdidas=$i.NumberOfMissedRuns; ativa=($t.State -ne 'Disabled') } } } | ConvertTo-Json -Compress`;
+  const ps = `$ErrorActionPreference='SilentlyContinue'; @(${lista}) | ForEach-Object { $t = Get-ScheduledTask -TaskName $_; if ($t) { $i = $t | Get-ScheduledTaskInfo; [pscustomobject]@{ nome=$t.TaskName; ultima=$i.LastRunTime.ToString('o'); resultado=$i.LastTaskResult; proxima=$(if ($i.NextRunTime) { $i.NextRunTime.ToString('o') } else { '' }); perdidas=$i.NumberOfMissedRuns; ativa=($t.State -ne 'Disabled'); gatilhos=@($t.Triggers | Where-Object { $_.Enabled } | ForEach-Object { $c = $_.CimClass.CimClassName; if ($_.Repetition.Interval) { @{ tipo='outro' } } elseif ($c -eq 'MSFT_TaskWeeklyTrigger') { @{ tipo='semanal'; inicio=$_.StartBoundary; dias=[int]$_.DaysOfWeek } } elseif ($c -eq 'MSFT_TaskDailyTrigger') { @{ tipo='diario'; inicio=$_.StartBoundary; intervalo=[int]$_.DaysInterval } } else { @{ tipo='outro' } } }) } } } | ConvertTo-Json -Compress -Depth 4`;
   const saida = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 60000, windowsHide: true }).trim();
   const j = saida ? JSON.parse(saida) : [];
   const data = (s) => { const d = s ? new Date(s) : null; return d && !Number.isNaN(d.getTime()) && d.getFullYear() > 2000 ? d : null; };
-  return new Map((Array.isArray(j) ? j : [j]).map((t) => [t.nome, { nome: t.nome, ultima: data(t.ultima), resultado: Number(t.resultado), proxima: t.ativa ? data(t.proxima) : null, perdidas: Number(t.perdidas) || 0 }]));
+  const agora = new Date();
+  return new Map((Array.isArray(j) ? j : [j]).map((t) => {
+    const gatilhos = Array.isArray(t.gatilhos) ? t.gatilhos : (t.gatilhos ? [t.gatilhos] : []);
+    return [t.nome, {
+      nome: t.nome, ultima: data(t.ultima), resultado: Number(t.resultado), proxima: t.ativa ? data(t.proxima) : null, perdidas: Number(t.perdidas) || 0,
+      // horario da agenda que ja passou: pega a rodada perdida mesmo quando o Windows zera o contador
+      agendada: t.ativa ? ultimoHorarioAgendado(gatilhos, agora) : null,
+      diasAgendados: diasDaAgenda(gatilhos),
+    }];
+  }));
 }
 
 // ---------- arquivos ----------
@@ -43,13 +53,20 @@ function maisNovo(pasta) {
 // so o fim do log (os logs crescem sem parar)
 const fimDoLog = (f) => { const t = ler(f); return t.length > 400000 ? t.slice(-400000) : t; };
 
+// furos (erro/rodada perdida) guardados entre uma geracao e outra: o aviso fica so no dia do furo e a
+// rodada seguinte que der certo mostra qual ela cobriu (avisoDoDia). Pasta painel/ e' ignorada no git.
+const ARQ_FUROS = path.join(SAIDA, 'furos.json');
+const furos = (() => { try { return JSON.parse(fs.readFileSync(ARQ_FUROS, 'utf8')); } catch { return {}; } })();
+
 function montarRobo(cfg, agendador) {
   const relatorio = cfg.pasta ? maisNovo(cfg.pasta) : null;
   const relatorioEm = [mtime(cfg.log), relatorio && mtime(relatorio)].filter(Boolean).sort((a, b) => b - a)[0] || null;
   const tarefas = cfg.tarefas.map((n) => {
     const info = agendador.get(n);
     if (!info) return { nome: n, estado: 'erro', texto: 'tarefa não existe no Agendador', ultima: null, proxima: null };
-    return { nome: n, ...estadoDaTarefa(info, relatorioEm), ultima: info.ultima, proxima: info.proxima };
+    const r = avisoDoDia({ nome: n, ...estadoDaTarefa(info, relatorioEm), ultima: info.ultima, proxima: info.proxima }, furos[n] || null, agora);
+    if (r.furo) furos[n] = r.furo; else delete furos[n];
+    return r.tarefa;
   });
   const log = fimDoLog(cfg.log);
   const bloco = cfg.id === 'materiais' ? ler(relatorio) : ultimaRodada(log, INICIO_RODADA[cfg.id]);
@@ -110,6 +127,7 @@ const robos = ROBOS.map((cfg) => {
 robos.splice(1, 0, await roboN8n(agora));
 
 fs.mkdirSync(SAIDA, { recursive: true });
+try { fs.writeFileSync(ARQ_FUROS, JSON.stringify(furos, null, 2), 'utf8'); } catch (e) { console.error('não gravei os furos:', e.message); }
 const destino = path.join(SAIDA, 'painel-robos.html');
 const tmp = destino + '.tmp';
 // simbolo da Agroadvance embutido na pagina (abre sem internet); sem o arquivo, a pagina sai sem ele

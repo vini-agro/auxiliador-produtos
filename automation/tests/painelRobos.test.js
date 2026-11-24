@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  estadoDaTarefa, estadoDoRobo, faixaTopo, ultimaRodada, resumir, avisouTeams, INICIO_RODADA, montarHtml,
+  estadoDaTarefa, estadoDoRobo, faixaTopo, ultimaRodada, resumir, avisouTeams, INICIO_RODADA, montarHtml, ultimoHorarioAgendado, avisoDoDia,
 } from '../src/painelRobos.js';
 
 const ult = new Date('2026-11-19T11:30:00Z');
@@ -40,6 +40,58 @@ test('estadoDaTarefa: perdida hoje vem antes do erro da rodada anterior', () => 
   const e = estadoDaTarefa(info({ perdidas: 1, resultado: 1 }), ult);
   assert.equal(e.estado, 'perdida');
   assert.match(e.texto, /^rodada perdida; a anterior deu erro na rodada de 19\/nov/);
+});
+
+// ---------- horario agendado (20/nov: a 18h de 19/nov se perdeu e so rodou sexta 11:08, sem efeito) ----------
+const semanal18h = { tipo: 'semanal', inicio: '2026-11-17T18:00:00-03:00', dias: 28 }; // ter+qua+qui
+
+test('ultimoHorarioAgendado: semanal pega o ultimo dia/hora da agenda que ja passou', () => {
+  assert.equal(ultimoHorarioAgendado([semanal18h], new Date('2026-11-20T11:38:00-03:00')).getTime(), new Date('2026-11-19T18:00:00-03:00').getTime());
+  // segunda: volta pra quinta
+  assert.equal(ultimoHorarioAgendado([semanal18h], new Date('2026-11-23T09:00:00-03:00')).getTime(), new Date('2026-11-19T18:00:00-03:00').getTime());
+});
+
+test('ultimoHorarioAgendado: da folga de poucos minutos para a tarefa comecar', () => {
+  assert.equal(ultimoHorarioAgendado([semanal18h], new Date('2026-11-19T18:02:00-03:00')).getTime(), new Date('2026-11-18T18:00:00-03:00').getTime());
+});
+
+test('ultimoHorarioAgendado: diario, varios gatilhos, sem gatilho e agenda que nem comecou', () => {
+  const diario6h = { tipo: 'diario', inicio: '2026-11-01T06:00:00-03:00', intervalo: 1 };
+  assert.equal(ultimoHorarioAgendado([diario6h], new Date('2026-11-20T05:00:00-03:00')).getTime(), new Date('2026-11-19T06:00:00-03:00').getTime());
+  const diario8h = { tipo: 'diario', inicio: '2026-11-01T08:00:00-03:00', intervalo: 1 };
+  assert.equal(ultimoHorarioAgendado([diario6h, diario8h], new Date('2026-11-20T09:00:00-03:00')).getTime(), new Date('2026-11-20T08:00:00-03:00').getTime());
+  assert.equal(ultimoHorarioAgendado([], new Date()), null);
+  assert.equal(ultimoHorarioAgendado([{ tipo: 'outro', inicio: '2026-11-01T06:00:00-03:00' }], new Date()), null);
+  assert.equal(ultimoHorarioAgendado([semanal18h], new Date('2026-11-17T12:00:00-03:00')), null);
+});
+
+const info18h = (over = {}) => info({
+  nome: 'Troca gravacao 18h', agendada: new Date('2026-11-19T18:00:00-03:00'), diasAgendados: [2, 3, 4], ...over,
+});
+
+test('estadoDaTarefa: nao rodou no ultimo horario da agenda = perdida, mesmo com o contador do Windows zerado', () => {
+  const e = estadoDaTarefa(info18h({ ultima: new Date('2026-11-19T08:17:33-03:00') }), new Date('2026-11-19T16:00:00-03:00'));
+  assert.equal(e.estado, 'perdida');
+  assert.equal(e.texto, 'não rodou em 19/nov 18:00');
+});
+
+test('estadoDaTarefa: so rodou depois, num dia fora da agenda = perdida (o robo sai sem fazer nada)', () => {
+  const sexta = new Date('2026-11-20T11:08:50-03:00');
+  const e = estadoDaTarefa(info18h({ ultima: sexta }), new Date(sexta.getTime() + 30000));
+  assert.equal(e.estado, 'perdida');
+  assert.equal(e.texto, 'não rodou em 19/nov 18:00; só rodou 20/nov 11:08, fora dos dias dela (não fez nada)');
+});
+
+test('estadoDaTarefa: atrasada mas num dia da agenda conta como rodada', () => {
+  const quinta = new Date('2026-11-19T08:17:33-03:00');
+  const e = estadoDaTarefa(info18h({ ultima: quinta, agendada: new Date('2026-11-18T18:00:00-03:00') }), new Date(quinta.getTime() + 30000));
+  assert.equal(e.estado, 'ok');
+});
+
+test('estadoDaTarefa: perdida no horario com erro na anterior mostra os dois', () => {
+  const e = estadoDaTarefa(info18h({ nome: 'Troca gravacao 10h', ultima: new Date('2026-11-18T15:03:45-03:00'), resultado: 1, agendada: new Date('2026-11-19T10:00:00-03:00'), perdidas: 1 }), null);
+  assert.equal(e.estado, 'perdida');
+  assert.equal(e.texto, 'não rodou em 19/nov 10:00; a anterior deu erro na rodada de 18/nov 15:03: o robô terminou com erro');
 });
 
 test('estadoDoRobo: pior estado vence', () => {
@@ -124,7 +176,7 @@ test('resumir revisor', () => {
 test('resumir certificados e materiais', () => {
   assert.deepEqual(resumir('certificados', '[19/11/2026, 08:17:42] olhando cursos\n[19/11/2026, 08:21:32] fim: 0 traduzido(s), 0 erro(s).'), ['fim: 0 traduzido(s), 0 erro(s).']);
   assert.deepEqual(resumir('materiais', ''), []);
-  assert.deepEqual(resumir('materiais', 'x\nResumo 19/nov/2026: 0 anexo(s) a subir · 0 ja estavam · 0 problema(s) · 1 aula(s) sem pasta\ny'), ['Resumo 19/nov/2026: 0 anexo(s) a subir · 0 ja estavam · 0 problema(s) · 1 aula(s) sem pasta']);
+  assert.deepEqual(resumir('materiais', 'x\nResumo 19/nov/2026: 0 anexo(s) a subir · 0 ja estavam · 0 problema(s) · 1 aula(s) sem pasta\ny', { hoje: new Date(2026, 10, 19) }), ['Resumo 19/nov/2026: 0 anexo(s) a subir · 0 ja estavam · 0 problema(s) · 1 aula(s) sem pasta']);
 });
 
 test('resumir materiais: dia passado so com algo a fazer ou problema', () => {
@@ -262,4 +314,71 @@ test('montarHtml: erro de leitura e perguntar ao Claude', () => {
   assert.match(h, /não consegui ler o n8n/);
   assert.match(h, /Copiar pergunta/);
   assert.match(h, /data-fontes="Log: C:\\x\\troca-gravacao.log"/);
+});
+
+// ---------- aviso so no dia (24/nov, pedido do usuario) ----------
+// furo de dia que ja passou nao alerta mais; quando a proxima rodada da certo, ela vem com "cobriu a de <data>"
+test('estadoDaTarefa: erro/perdida dizem quando foi o furo', () => {
+  const p = estadoDaTarefa(info18h({ ultima: new Date('2026-11-19T08:17:33-03:00') }), null);
+  assert.equal(p.quando.getTime(), new Date('2026-11-19T18:00:00-03:00').getTime());
+  const e = estadoDaTarefa(info({ resultado: 1 }), ult);
+  assert.equal(e.quando.getTime(), ult.getTime());
+});
+
+const furo10h = { estado: 'perdida', texto: 'não rodou em 19/nov 10:00', quando: new Date('2026-11-19T10:00:00-03:00') };
+
+test('avisoDoDia: furo de hoje continua alertando e fica guardado', () => {
+  const agora = new Date('2026-11-24T10:20:00-03:00');
+  const t = { nome: 'Troca gravacao 10h', estado: 'erro', texto: 'erro x', quando: new Date('2026-11-24T10:00:00-03:00') };
+  const r = avisoDoDia(t, null, agora);
+  assert.equal(r.tarefa.estado, 'erro');
+  assert.deepEqual(r.furo, { estado: 'erro', texto: 'erro x', quando: '2026-11-24T13:00:00.000Z' });
+});
+
+test('avisoDoDia: furo de dia que ja passou nao alerta, so lembra que a proxima cobre', () => {
+  const agora = new Date('2026-11-24T09:47:00-03:00');
+  const r = avisoDoDia({ nome: 'Troca gravacao 10h', ...furo10h }, null, agora);
+  assert.equal(r.tarefa.estado, 'antiga');
+  assert.equal(r.tarefa.texto, 'não rodou em 19/nov 10:00 · a próxima rodada cobre');
+  assert.equal(r.furo.quando, furo10h.quando.toISOString());
+  assert.equal(estadoDoRobo(['ok', 'antiga']), 'ok');
+  assert.deepEqual(faixaTopo([{ nome: 'Troca', tarefas: [r.tarefa] }]), { ok: true, itens: [] });
+});
+
+test('avisoDoDia: rodada seguinte que deu certo vem com o furo que ela cobriu, so no dia dela', () => {
+  const guardado = { estado: 'perdida', texto: furo10h.texto, quando: furo10h.quando.toISOString() };
+  const ok = { nome: 'Troca gravacao 10h', estado: 'ok', texto: 'em dia', ultima: new Date('2026-11-24T10:00:05-03:00') };
+  const hoje = avisoDoDia(ok, guardado, new Date('2026-11-24T10:10:00-03:00'));
+  assert.equal(hoje.tarefa.cobriu.estado, 'perdida');
+  assert.equal(hoje.tarefa.cobriu.quando.getTime(), furo10h.quando.getTime());
+  assert.deepEqual(hoje.furo, guardado);
+  const amanha = avisoDoDia(ok, guardado, new Date('2026-11-25T07:00:00-03:00'));
+  assert.equal(amanha.tarefa.cobriu, undefined);
+  assert.equal(amanha.furo, null);
+});
+
+test('avisoDoDia: sem furo guardado nada muda', () => {
+  const ok = { nome: 'x', estado: 'ok', texto: 'em dia', ultima: new Date() };
+  assert.deepEqual(avisoDoDia(ok, null, new Date()), { tarefa: ok, furo: null });
+});
+
+test('montarHtml: furo antigo em cinza e rodada que cobriu o furo', () => {
+  const agora = new Date(2026, 10, 24, 10, 10);
+  const r = roboBase({ estado: 'ok', tarefas: [
+    { nome: 'Troca gravacao 10h', estado: 'ok', texto: 'em dia', ultima: new Date(2026, 10, 24, 10, 0), proxima: new Date(2026, 10, 25, 10, 0), cobriu: { estado: 'perdida', quando: new Date(2026, 10, 19, 10, 0) } },
+    { nome: 'Troca gravacao 13h', estado: 'ok', texto: 'em dia', ultima: new Date(2026, 10, 24, 13, 0), proxima: new Date(2026, 10, 25, 13, 0), cobriu: { estado: 'erro', quando: new Date(2026, 10, 24, 10, 0) } },
+    { nome: 'Troca gravacao 18h', estado: 'antiga', texto: 'não rodou em 19/nov 18:00 · a próxima rodada cobre', ultima: new Date(2026, 10, 20, 11, 8), proxima: new Date(2026, 10, 24, 18, 0) },
+  ] });
+  const h = montarHtml({ geradoEm: agora, faixa: { ok: true, itens: [] }, robos: [r] });
+  const li = (nome) => (h.match(new RegExp(`<li[^>]*>[^<]*<b>${nome}:</b>.*?</li>`)) || [''])[0];
+  assert.match(li('Troca gravacao 10h'), /✅ <b>Troca gravacao 10h:<\/b> concluída hoje 10:00 · cobriu a rodada de 19\/nov 10:00 que não rodou/);
+  assert.match(li('Troca gravacao 13h'), /cobriu a rodada de 24\/nov 10:00 que deu erro/);
+  assert.match(li('Troca gravacao 18h'), /class="t-antiga">○ <b>Troca gravacao 18h:<\/b> não rodou em 19\/nov 18:00 · a próxima rodada cobre/);
+});
+
+test('avisoDoDia: furo sem horario guarda a 1a vez que o painel viu, nao a ultima', () => {
+  const t = { nome: 'Robo Materiais', estado: 'perdida', texto: 'rodada perdida', ultima: new Date('2026-11-24T08:15:12-03:00') };
+  const r1 = avisoDoDia(t, null, new Date('2026-11-24T10:00:30-03:00'));
+  const r2 = avisoDoDia(t, r1.furo, new Date('2026-11-24T10:15:01-03:00'));
+  assert.equal(r2.furo.quando, new Date('2026-11-24T10:00:30-03:00').toISOString());
 });

@@ -5,6 +5,7 @@
 const RODANDO = 267009; // 0x41301
 const NUNCA = 267011; // 0x41303
 const FOLGA_RELATORIO = 60 * 1000;
+const FOLGA_INICIO = 5 * 60 * 1000; // a tarefa tem 5 min para comecar antes de contar como perdida
 
 const ORDEM = ['erro', 'perdida', 'sem-relatorio', 'rodando', 'nunca', 'ok'];
 const TEXTO_ESTADO = {
@@ -22,17 +23,85 @@ export function estadoDaTarefa(info, relatorioEm) {
   const r = Number(info.resultado);
   if (r === RODANDO) return { estado: 'rodando', texto: TEXTO_ESTADO.rodando };
   if (r === NUNCA || !info.ultima) return { estado: 'nunca', texto: TEXTO_ESTADO.nunca };
+  // confere contra a agenda: o contador de perdidas do Windows zera quando a tarefa roda atrasada
+  // (StartWhenAvailable), mesmo que essa rodada caia num dia em que o robo sai sem fazer nada
+  // `quando` = momento do furo, usado por avisoDoDia (aviso so no dia do furo)
+  const slot = info.agendada;
+  if (slot && info.ultima.getTime() < slot.getTime() - FOLGA_INICIO) {
+    return { estado: 'perdida', quando: slot, texto: `não rodou em ${curta(slot)}${r !== 0 ? `; a anterior deu ${textoErro(r, info.ultima)}` : ''}` };
+  }
+  if (slot && info.diasAgendados && !info.diasAgendados.includes(info.ultima.getDay())) {
+    return { estado: 'perdida', quando: slot, texto: `não rodou em ${curta(slot)}; só rodou ${curta(info.ultima)}, fora dos dias dela (não fez nada)` };
+  }
   // rodada perdida e' o fato mais recente: aparece antes do resultado da ultima que rodou
+  // (contador do Windows sem horario conhecido: sem `quando`, alerta como sendo de hoje)
   if (info.perdidas > 0) return { estado: 'perdida', texto: r !== 0 ? `rodada perdida; a anterior deu ${textoErro(r, info.ultima)}` : TEXTO_ESTADO.perdida };
-  if (r !== 0) return { estado: 'erro', texto: textoErro(r, info.ultima) };
+  if (r !== 0) return { estado: 'erro', quando: info.ultima, texto: textoErro(r, info.ultima) };
   if (!relatorioEm || relatorioEm.getTime() < info.ultima.getTime() - FOLGA_RELATORIO) return { estado: 'sem-relatorio', texto: TEXTO_ESTADO['sem-relatorio'] };
   return { estado: 'ok', texto: TEXTO_ESTADO.ok };
 }
 
-/** Pior estado entre as tarefas do robo. Sem tarefas = "nunca". */
+/**
+ * Ultimo horario da agenda que ja passou (com FOLGA_INICIO para a tarefa comecar), ou null.
+ * gatilhos = [{ tipo: 'semanal', inicio: ISO, dias: mascara do Windows (dom=1, seg=2 ... sab=64) }
+ *            | { tipo: 'diario', inicio: ISO, intervalo: dias }]; outros tipos sao ignorados.
+ */
+export function ultimoHorarioAgendado(gatilhos, agora) {
+  let melhor = null;
+  for (const g of gatilhos || []) {
+    if (g.tipo !== 'semanal' && g.tipo !== 'diario') continue;
+    const inicio = new Date(g.inicio);
+    if (Number.isNaN(inicio.getTime())) continue;
+    for (let d = 0; d <= 14; d++) {
+      const slot = new Date(agora);
+      slot.setDate(slot.getDate() - d);
+      slot.setHours(inicio.getHours(), inicio.getMinutes(), 0, 0);
+      if (slot < inicio || slot.getTime() > agora.getTime() - FOLGA_INICIO) continue;
+      const ok = g.tipo === 'semanal'
+        ? (Number(g.dias) & (1 << slot.getDay())) !== 0
+        : Math.round((slot - inicio) / 86400000) % (Number(g.intervalo) || 1) === 0;
+      if (ok) { if (!melhor || slot > melhor) melhor = slot; break; }
+    }
+  }
+  return melhor;
+}
+
+/** Dias da semana (getDay: dom=0) em que um gatilho semanal roda; null se algum gatilho roda todo dia/outro tipo. */
+export function diasDaAgenda(gatilhos) {
+  const semanais = (gatilhos || []).filter((g) => g.tipo === 'semanal');
+  if (!semanais.length || semanais.length !== (gatilhos || []).length) return null;
+  const dias = new Set();
+  for (const g of semanais) for (let k = 0; k < 7; k++) if (Number(g.dias) & (1 << k)) dias.add(k);
+  return [...dias].sort();
+}
+
+/**
+ * Aviso so no dia (pedido do usuario, 24/nov): erro/perdida de um dia que ja passou vira "antiga" (cinza,
+ * fora da faixa do topo) ate a proxima rodada; a rodada seguinte que der certo mostra, no dia dela, o furo
+ * que cobriu. `furo` e' o guardado em disco entre uma geracao e outra ({ estado, texto, quando: ISO }).
+ * Devolve { tarefa, furo } com o furo a guardar (null = apagar).
+ */
+export function avisoDoDia(tarefa, furo, agora) {
+  if (tarefa.estado === 'erro' || tarefa.estado === 'perdida') {
+    // furo sem horario (so o contador do Windows): fica a 1a vez que o painel viu, nao a ultima
+    const aindaAberto = furo && !tarefa.quando && (!tarefa.ultima || tarefa.ultima <= new Date(furo.quando));
+    const quando = tarefa.quando || (aindaAberto ? new Date(furo.quando) : agora);
+    const novo = { estado: tarefa.estado, texto: tarefa.texto, quando: quando.toISOString() };
+    if (mesmoDia(quando, agora)) return { tarefa, furo: novo };
+    return { tarefa: { ...tarefa, estado: 'antiga', texto: `${tarefa.texto} · a próxima rodada cobre` }, furo: novo };
+  }
+  if (!furo) return { tarefa, furo: null };
+  const quando = new Date(furo.quando);
+  if (tarefa.estado !== 'ok' || !tarefa.ultima || tarefa.ultima <= quando) return { tarefa, furo };
+  if (!mesmoDia(tarefa.ultima, agora)) return { tarefa, furo: null };
+  return { tarefa: { ...tarefa, cobriu: { estado: furo.estado, quando } }, furo };
+}
+
+/** Pior estado entre as tarefas do robo. Sem tarefas = "nunca". Furo antigo nao pesa no cartao. */
 export function estadoDoRobo(estados) {
   if (!estados || !estados.length) return 'nunca';
-  return ORDEM.find((e) => estados.includes(e)) || 'ok';
+  const es = estados.map((e) => (e === 'antiga' ? 'ok' : e));
+  return ORDEM.find((e) => es.includes(e)) || 'ok';
 }
 
 /** Faixa do topo: ok so se nenhuma tarefa com erro/perdida/sem relatorio e nenhum erro de leitura. */
@@ -135,7 +204,10 @@ function linhaTarefa(t, agora) {
     icone = '○'; classe = 'sem-hoje'; texto = `sem rodada hoje · última ${t.ultima ? curta(t.ultima) : 'nunca'}`;
   } else if (t.estado === 'ok') {
     texto = `concluída hoje ${hora(t.ultima)}`;
+  } else if (t.estado === 'antiga') {
+    icone = '○';
   }
+  if (t.cobriu) texto += ` · cobriu a rodada de ${curta(t.cobriu.quando)} ${t.cobriu.estado === 'erro' ? 'que deu erro' : 'que não rodou'}`;
   const prox = t.proxima && classe !== 'aguarda' ? ` · próxima ${esc(curta(t.proxima))}` : '';
   return `<li class="t-${esc(classe)}">${icone} <b>${esc(t.nome)}:</b> ${esc(texto)}${prox}</li>`;
 }
