@@ -25,8 +25,10 @@ const ROBOS = [
 // ---------- Agendador (datas em ISO para nao depender do formato pt-BR) ----------
 function lerAgendador(nomes) {
   const lista = nomes.map((n) => `'${n.replace(/'/g, "''")}'`).join(',');
-  const ps = `$ErrorActionPreference='SilentlyContinue'; @(${lista}) | ForEach-Object { $t = Get-ScheduledTask -TaskName $_; if ($t) { $i = $t | Get-ScheduledTaskInfo; [pscustomobject]@{ nome=$t.TaskName; ultima=$i.LastRunTime.ToString('o'); resultado=$i.LastTaskResult; proxima=$(if ($i.NextRunTime) { $i.NextRunTime.ToString('o') } else { '' }); perdidas=$i.NumberOfMissedRuns; ativa=($t.State -ne 'Disabled'); gatilhos=@($t.Triggers | Where-Object { $_.Enabled } | ForEach-Object { $c = $_.CimClass.CimClassName; if ($_.Repetition.Interval) { @{ tipo='outro' } } elseif ($c -eq 'MSFT_TaskWeeklyTrigger') { @{ tipo='semanal'; inicio=$_.StartBoundary; dias=[int]$_.DaysOfWeek } } elseif ($c -eq 'MSFT_TaskDailyTrigger') { @{ tipo='diario'; inicio=$_.StartBoundary; intervalo=[int]$_.DaysInterval } } else { @{ tipo='outro' } } }) } } } | ConvertTo-Json -Compress -Depth 4`;
-  const saida = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 60000, windowsHide: true }).trim();
+  // servico do Agendador (COM): ~0,3 s para todas; Get-ScheduledTask -TaskName leva ~4 s cada e estourava o tempo
+  // gatilho COM: Type 2 = diario, 3 = semanal (DaysOfWeek e' o mesmo bitmask do CIM)
+  const ps = `$ErrorActionPreference='SilentlyContinue'; $svc = New-Object -ComObject Schedule.Service; $svc.Connect(); $raiz = $svc.GetFolder('\\'); @(${lista}) | ForEach-Object { $t = $null; try { $t = $raiz.GetTask($_) } catch {}; if ($t) { [pscustomobject]@{ nome=$t.Name; ultima=$t.LastRunTime.ToString('o'); resultado=$t.LastTaskResult; proxima=$t.NextRunTime.ToString('o'); perdidas=$t.NumberOfMissedRuns; ativa=$t.Enabled; gatilhos=@($t.Definition.Triggers | Where-Object { $_.Enabled } | ForEach-Object { if ($_.Repetition.Interval) { @{ tipo='outro' } } elseif ($_.Type -eq 3) { @{ tipo='semanal'; inicio=$_.StartBoundary; dias=[int]$_.DaysOfWeek } } elseif ($_.Type -eq 2) { @{ tipo='diario'; inicio=$_.StartBoundary; intervalo=[int]$_.DaysInterval } } else { @{ tipo='outro' } } }) } } } | ConvertTo-Json -Compress -Depth 4`;
+  const saida = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', timeout: 120000, windowsHide: true }).trim();
   const j = saida ? JSON.parse(saida) : [];
   const data = (s) => { const d = s ? new Date(s) : null; return d && !Number.isNaN(d.getTime()) && d.getFullYear() > 2000 ? d : null; };
   const agora = new Date();
@@ -63,6 +65,8 @@ function montarRobo(cfg, agendador) {
   const relatorioEm = [mtime(cfg.log), relatorio && mtime(relatorio)].filter(Boolean).sort((a, b) => b - a)[0] || null;
   const tarefas = cfg.tarefas.map((n) => {
     const info = agendador.get(n);
+    // sem leitura do Agendador nao da' para dizer que a tarefa sumiu: fica neutra e o aviso sai uma vez so' no topo
+    if (!info && erroAgendador) return { nome: n, estado: 'nunca', texto: 'sem leitura do Agendador', ultima: null, proxima: null };
     if (!info) return { nome: n, estado: 'erro', texto: 'tarefa não existe no Agendador', ultima: null, proxima: null };
     const r = avisoDoDia({ nome: n, ...estadoDaTarefa(info, relatorioEm), ultima: info.ultima, proxima: info.proxima }, furos[n] || null, agora);
     if (r.furo) furos[n] = r.furo; else delete furos[n];
@@ -115,7 +119,9 @@ async function roboN8n(agora) {
 const agora = new Date();
 let agendador = new Map();
 let erroAgendador = null;
-try { agendador = lerAgendador(ROBOS.flatMap((r) => r.tarefas)); } catch (e) { erroAgendador = e.message.split('\n')[0]; }
+for (let tentativa = 1; tentativa <= 2; tentativa++) {
+  try { agendador = lerAgendador(ROBOS.flatMap((r) => r.tarefas)); erroAgendador = null; break; } catch (e) { erroAgendador = e.message.split('\n')[0]; }
+}
 const robos = ROBOS.map((cfg) => {
   try {
     const r = montarRobo(cfg, agendador);

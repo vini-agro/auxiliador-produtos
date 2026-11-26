@@ -107,6 +107,15 @@ test('faixaTopo: cita a tarefa exata', () => {
   assert.deepEqual(faixaTopo([{ nome: 'Divisor', tarefas: [{ nome: 'Descer divisor 06h', estado: 'ok', texto: '' }] }]), { ok: true, itens: [] });
 });
 
+test('faixaTopo: o mesmo erro de leitura em varios robos vira uma linha so', () => {
+  const erro = 'não consegui ler o Agendador: ETIMEDOUT';
+  const semLeitura = (nome, tarefa) => ({ nome, erroLeitura: erro, tarefas: [{ nome: tarefa, estado: 'nunca', texto: 'sem leitura do Agendador' }] });
+  assert.deepEqual(faixaTopo([semLeitura('Troca', 'Troca 10h'), semLeitura('Divisor', 'Descer divisor 06h')]), {
+    ok: false, itens: ['Não consegui ler o Agendador: ETIMEDOUT (afeta: Troca, Divisor)'],
+  });
+  assert.deepEqual(faixaTopo([{ nome: 'n8n', erroLeitura: 'sem chave', tarefas: [] }]), { ok: false, itens: ['n8n: sem chave'] });
+});
+
 test('faixaTopo: erro de leitura do robo entra na faixa', () => {
   const r = faixaTopo([{ nome: 'Presença Zoom (n8n)', tarefas: [], erroLeitura: 'não consegui ler o n8n' }]);
   assert.equal(r.ok, false);

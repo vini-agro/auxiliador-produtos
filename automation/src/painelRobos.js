@@ -107,8 +107,11 @@ export function estadoDoRobo(estados) {
 /** Faixa do topo: ok so se nenhuma tarefa com erro/perdida/sem relatorio e nenhum erro de leitura. */
 export function faixaTopo(robos) {
   const itens = [];
+  // o mesmo erro de leitura em varios robos (ex.: Agendador) vira uma linha so', com os robos afetados
+  const leituras = new Map();
+  for (const r of robos || []) if (r.erroLeitura) leituras.set(r.erroLeitura, [...(leituras.get(r.erroLeitura) || []), r.nome]);
+  for (const [erro, nomes] of leituras) itens.push(nomes.length > 1 ? `${erro[0].toUpperCase()}${erro.slice(1)} (afeta: ${nomes.join(', ')})` : `${nomes[0]}: ${erro}`);
   for (const r of robos || []) {
-    if (r.erroLeitura) itens.push(`${r.nome}: ${r.erroLeitura}`);
     for (const t of r.tarefas || []) if (['erro', 'perdida', 'sem-relatorio'].includes(t.estado)) itens.push(`${t.nome}: ${t.texto}`);
   }
   return { ok: itens.length === 0, itens };
