@@ -83,13 +83,20 @@ async function markOneStudent(browser, student) {
     await searchInput.fill(student.email);
     await page.waitForTimeout(1500);
 
-    const nameLocator = usersFrame.getByText(student.name, { exact: true }).first();
+    // a busca acha tambem e-mails que comecam igual (aluno com conta x@gmail.com e x@gmail.com.br, mesmo nome):
+    // clica no nome da linha do e-mail EXATO e confere se a conta aberta e' a do aluno
+    const emailExato = usersFrame.getByText(student.email, { exact: true }).first();
+    const nameLocator = (await emailExato.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false))
+      ? emailExato.locator(`xpath=ancestor::*[.//*[normalize-space(text())=${JSON.stringify(student.name)}]][1]`).getByText(student.name, { exact: true }).first()
+      : usersFrame.getByText(student.name, { exact: true }).first();
     const nameVisible = await nameLocator.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
     if (!nameVisible) return { ok: false, reason: 'nome nao encontrado na busca' };
 
     const profResponsePromise = page.waitForResponse((r) => r.url().includes('/api/author/user/'), { timeout: 10000 }).catch(() => null);
     await nameLocator.click();
-    await profResponsePromise;
+    const profResponse = await profResponsePromise;
+    const contaAberta = profResponse ? (profResponse.url().match(/\/api\/author\/user\/([a-f0-9]+)/) || [])[1] : null;
+    if (contaAberta && contaAberta !== student.id) return { ok: false, reason: `abriu outra conta (${contaAberta}) com o mesmo nome; nada gravado` };
     await page.waitForTimeout(1500);
 
     const manageVisible = await page.getByText('Manage user', { exact: true }).waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
